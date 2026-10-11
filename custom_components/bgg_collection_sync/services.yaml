@@ -6,7 +6,174 @@ get_games:
       example: "German"
       selector:
         text:
+    type:
+      default: all
+      selector:
+        select:
+          options: [all, games, expansions]
     entry_id:
       selector:
         config_entry:
           integration: bgg_collection_sync
+
+set_game_meta:
+  fields:
+    bgg_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    name:
+      example: "Catan"
+      selector:
+        text:
+    location:
+      example: "Regal 2, Fach 3"
+      selector:
+        text:
+    nfc_tag:
+      selector:
+        text:
+    spotify_uri:
+      example: "https://open.spotify.com/playlist/37i9dQZF1DX..."
+      selector:
+        text:
+    light_scene:
+      selector:
+        entity:
+          domain: [scene, script]
+
+assign_scanned_tag:
+  fields:
+    bgg_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    name:
+      selector:
+        text:
+
+start_play:
+  fields:
+    bgg_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    name:
+      selector:
+        text:
+    players:
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+
+end_play:
+  fields:
+    winner:
+      selector:
+        text:
+    note:
+      selector:
+        text:
+          multiline: true
+    players:
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+
+cancel_play:
+
+log_play:
+  fields:
+    bgg_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    name:
+      selector:
+        text:
+    played_at:
+      selector:
+        datetime:
+    duration_min:
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+    players:
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+    winner:
+      selector:
+        text:
+    note:
+      selector:
+        text:
+          multiline: true
+
+get_plays:
+  fields:
+    bgg_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    name:
+      selector:
+        text:
+    limit:
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 500
+          mode: box
+
+suggest_game:
+  fields:
+    players:
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+    mode:
+      default: any
+      selector:
+        select:
+          options: [any, cooperative, competitive]
+    game_type:
+      default: any
+      selector:
+        select:
+          options: [any, family, strategy, party, abstract, thematic, wargame, children]
+    max_playtime:
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: min
+          mode: box
+
+reject_suggestion:
+
+accept_suggestion:
+
+reset_suggestion:

@@ -1,10 +1,10 @@
-"""Koordinator: holt die Sammlung von BGG und speichert sie in SQLite."""
+"""Koordinator: holt Sammlung + Erweiterungen von BGG und speichert sie in SQLite."""
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections import Counter
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,15 +13,18 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import THING_BATCH_SIZE, BggAuthError, BggClient, BggError
+from .api import EXPANSION, THING_BATCH_SIZE, BggAuthError, BggClient, BggError
 from .const import (
+    CONF_INCLUDE_EXPANSIONS,
     CONF_INTERVAL_HOURS,
     CONF_ONLY_OWNED,
+    DEFAULT_INCLUDE_EXPANSIONS,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_ONLY_OWNED,
     DOMAIN,
 )
 from .db import SEP, BggDatabase
+from .manager import BggManager
 
 _LOGGER = logging.getLogger(__name__)
 UNKNOWN_LANGUAGE = "Unbekannt"
@@ -29,7 +32,7 @@ PAUSE_BETWEEN_REQUESTS = 2
 
 
 class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Synchronisiert die Sammlung."""
+    """Synchronisiert Sammlung und Erweiterungen; hält den lokalen Zustand aktuell."""
 
     config_entry: ConfigEntry
 
@@ -47,30 +50,99 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self.db = db
+        self.manager = BggManager(hass, self)
 
+    # ---- lokaler Zustand --------------------------------------------------
+    def _load_local(self) -> tuple[Any, ...]:
+        user = self.client.username
+        plays = self.db.get_plays(user, limit=1)
+        return (
+            self.db.get_games(user),
+            self.db.get_active_play(user),
+            self.db.count_plays(user),
+            plays[0] if plays else None,
+        )
+
+    def _summarize(self, local: tuple[Any, ...], last_sync: datetime) -> dict[str, Any]:
+        everything, active, play_count, last_play = local
+        games = [g for g in everything if g["subtype"] != EXPANSION]
+        expansions = [g for g in everything if g["subtype"] == EXPANSION]
+
+        if active:
+            game = next((g for g in everything if g["bgg_id"] == active["bgg_id"]), None)
+            active["location"] = game["location"] if game else ""
+
+        languages: Counter[str] = Counter()
+        for game in games:
+            for lang in game["languages"] or [UNKNOWN_LANGUAGE]:
+                languages[lang] += 1
+
+        return {
+            "count": len(games),
+            "expansion_count": len(expansions),
+            "languages": dict(languages.most_common()),
+            "games": games,
+            "expansions": expansions,
+            "active_play": active,
+            "play_count": play_count,
+            "last_play": last_play,
+            "last_sync": last_sync,
+        }
+
+    async def async_refresh_local(self) -> None:
+        """Liest DB neu ein (nach Metadaten-/Partie-Änderungen), ohne BGG abzufragen."""
+        local = await self.hass.async_add_executor_job(self._load_local)
+        self.async_set_updated_data(self._summarize(local, self.data["last_sync"]))
+
+    # ---- BGG-Sync ---------------------------------------------------------
     async def _async_update_data(self) -> dict[str, Any]:
-        only_owned = self.config_entry.options.get(CONF_ONLY_OWNED, DEFAULT_ONLY_OWNED)
+        opts = self.config_entry.options
+        only_owned = opts.get(CONF_ONLY_OWNED, DEFAULT_ONLY_OWNED)
+        include_exp = opts.get(CONF_INCLUDE_EXPANSIONS, DEFAULT_INCLUDE_EXPANSIONS)
         try:
             items = await self.client.fetch_collection(only_owned)
+            if include_exp:
+                await asyncio.sleep(PAUSE_BETWEEN_REQUESTS)
+                seen = {i.bgg_id for i in items}
+                for exp in await self.client.fetch_collection(only_owned, expansions=True):
+                    if exp.bgg_id not in seen:
+                        exp.subtype = EXPANSION
+                        items.append(exp)
 
-            # Versionen (und deren Sprachen) nur für unbekannte Versionen nachladen
-            known = await self.hass.async_add_executor_job(self.db.known_version_ids)
-            missing_games = sorted(
-                {i.bgg_id for i in items if i.version_id and i.version_id not in known}
+            # Versionen/Sprachen, Spielinfos und Verknüpfungen nur bei Bedarf nachladen
+            run = self.hass.async_add_executor_job
+            known = await run(self.db.known_version_ids)
+            checked = await run(self.db.checked_expansion_ids)
+            known_info = await run(self.db.known_info_ids)
+            expansion_ids = {i.bgg_id for i in items if i.subtype == EXPANSION}
+            need = sorted(
+                {
+                    i.bgg_id
+                    for i in items
+                    if (i.version_id and i.version_id not in known)
+                    or i.bgg_id not in known_info
+                    or (i.bgg_id in expansion_ids and i.bgg_id not in checked)
+                }
             )
-            for start in range(0, len(missing_games), THING_BATCH_SIZE):
-                chunk = missing_games[start : start + THING_BATCH_SIZE]
+            for start in range(0, len(need), THING_BATCH_SIZE):
+                chunk = need[start : start + THING_BATCH_SIZE]
                 try:
-                    versions = await self.client.fetch_versions(chunk)
+                    things = await self.client.fetch_things(chunk)
                 except BggAuthError:
                     raise
                 except BggError as err:
-                    _LOGGER.warning("Versionen konnten nicht geladen werden: %s", err)
+                    _LOGGER.warning("Details konnten nicht geladen werden: %s", err)
                     break
-                await self.hass.async_add_executor_job(self.db.upsert_versions, versions)
+                await run(self.db.upsert_versions, things.versions)
+                await run(self.db.upsert_info, things.info)
+                await run(
+                    self.db.save_expansion_links,
+                    [i for i in chunk if i in expansion_ids],
+                    things.base_links,
+                )
                 await asyncio.sleep(PAUSE_BETWEEN_REQUESTS)
 
-            cached = await self.hass.async_add_executor_job(self.db.get_version_languages)
+            cached = await run(self.db.get_version_languages)
             synced_at = dt_util.utcnow()
             rows = []
             for it in items:
@@ -78,6 +150,7 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 rows.append(
                     {
                         "bgg_id": it.bgg_id,
+                        "subtype": it.subtype,
                         "name": it.name,
                         "year": it.year,
                         "image": it.image,
@@ -94,24 +167,11 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "last_modified": it.last_modified,
                     }
                 )
-            username = self.client.username
-            await self.hass.async_add_executor_job(
-                self.db.replace_games, username, rows, synced_at.isoformat()
-            )
-            games = await self.hass.async_add_executor_job(self.db.get_games, username)
+            await run(self.db.replace_games, self.client.username, rows, synced_at.isoformat())
+            local = await run(self._load_local)
         except BggAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except BggError as err:
             raise UpdateFailed(str(err)) from err
 
-        languages: Counter[str] = Counter()
-        for game in games:
-            for lang in game["languages"] or [UNKNOWN_LANGUAGE]:
-                languages[lang] += 1
-
-        return {
-            "count": len(games),
-            "languages": dict(languages.most_common()),
-            "games": games,
-            "last_sync": synced_at,
-        }
+        return self._summarize(local, synced_at)

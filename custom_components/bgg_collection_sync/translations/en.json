@@ -4,11 +4,16 @@
       "user": {
         "title": "Connect BoardGameGeek",
         "description": "Enter your BGG username. Since 2025 BGG requires an API token (bearer) for the XML API.",
-        "data": { "username": "BGG username", "token": "API token" }
+        "data": {
+          "username": "BGG username",
+          "token": "API token"
+        }
       },
       "reauth_confirm": {
         "title": "New API token required",
-        "data": { "token": "API token" }
+        "data": {
+          "token": "API token"
+        }
       }
     },
     "error": {
@@ -26,15 +31,34 @@
       "init": {
         "data": {
           "interval_hours": "Sync interval (hours)",
-          "only_owned": "Only sync owned games"
+          "only_owned": "Only sync owned games",
+          "include_expansions": "Sync expansions and link them to base games",
+          "media_player": "Media player for playlists",
+          "end_scene": "Scene/script at end of play"
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "collection": { "name": "Collection" },
-      "last_sync": { "name": "Last sync" }
+      "collection": {
+        "name": "Collection"
+      },
+      "last_sync": {
+        "name": "Last sync"
+      },
+      "expansions": {
+        "name": "Expansions"
+      },
+      "plays": {
+        "name": "Plays"
+      },
+      "session": {
+        "name": "Session"
+      },
+      "suggestion": {
+        "name": "Suggestion"
+      }
     }
   },
   "services": {
@@ -44,11 +68,191 @@
     },
     "get_games": {
       "name": "Get games",
-      "description": "Returns the stored games including the language of the selected version.",
+      "description": "Returns the stored games and expansions including language of the selected version and links.",
       "fields": {
-        "language": { "name": "Language", "description": "Only games whose selected version has this language (BGG name, e.g. German)." },
-        "entry_id": { "name": "Entry", "description": "Only query this BGG account." }
+        "language": {
+          "name": "Language",
+          "description": "Only games whose selected version has this language (BGG name, e.g. German)."
+        },
+        "entry_id": {
+          "name": "Entry",
+          "description": "Only query this BGG account."
+        },
+        "type": {
+          "name": "Type",
+          "description": "all = games and expansions, games = base games only, expansions = expansions only."
+        }
       }
+    },
+    "set_game_meta": {
+      "name": "Set game assignment",
+      "description": "Assigns location, NFC tag, Spotify playlist and light profile to a game.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG ID",
+          "description": "BGG ID of the game (alternative to name)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Game name (a unique part is enough)."
+        },
+        "location": {
+          "name": "Location",
+          "description": "Where the game is stored, e.g. \"Shelf 2, slot 3\". Empty = clear."
+        },
+        "nfc_tag": {
+          "name": "NFC tag",
+          "description": "Tag ID from Settings → Tags. Empty = clear."
+        },
+        "spotify_uri": {
+          "name": "Spotify playlist",
+          "description": "Spotify link or URI. Empty = clear."
+        },
+        "light_scene": {
+          "name": "Light profile",
+          "description": "Scene or script activated when a game starts. Empty = clear."
+        }
+      }
+    },
+    "assign_scanned_tag": {
+      "name": "Assign scanned tag",
+      "description": "Assigns the most recently scanned NFC tag (last 10 min) to the game.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG ID",
+          "description": "BGG ID of the game (alternative to name)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Game name (a unique part is enough)."
+        }
+      }
+    },
+    "start_play": {
+      "name": "Start play",
+      "description": "Starts logging; without a game the accepted suggestion is used. Activates light and playlist.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG ID",
+          "description": "BGG ID of the game (alternative to name)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Game name (a unique part is enough)."
+        },
+        "players": {
+          "name": "Players",
+          "description": "Number of players."
+        }
+      }
+    },
+    "end_play": {
+      "name": "End play",
+      "description": "Ends the running play and stores its duration.",
+      "fields": {
+        "winner": {
+          "name": "Winner",
+          "description": "Who won (optional)."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Free text about the play (optional)."
+        },
+        "players": {
+          "name": "Players",
+          "description": "Number of players."
+        }
+      }
+    },
+    "cancel_play": {
+      "name": "Cancel play",
+      "description": "Discards the running play without logging it."
+    },
+    "log_play": {
+      "name": "Log play",
+      "description": "Manually logs a play that already happened.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG ID",
+          "description": "BGG ID of the game (alternative to name)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Game name (a unique part is enough)."
+        },
+        "played_at": {
+          "name": "Played at",
+          "description": "When it was played (default: now)."
+        },
+        "duration_min": {
+          "name": "Duration (minutes)",
+          "description": "Length of the play."
+        },
+        "players": {
+          "name": "Players",
+          "description": "Number of players."
+        },
+        "winner": {
+          "name": "Winner",
+          "description": "Who won (optional)."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Free text about the play (optional)."
+        }
+      }
+    },
+    "get_plays": {
+      "name": "Get plays",
+      "description": "Returns stored plays (optionally for one game).",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG ID",
+          "description": "BGG ID of the game (alternative to name)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Game name (a unique part is enough)."
+        },
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of plays."
+        }
+      }
+    },
+    "suggest_game": {
+      "name": "Suggest game",
+      "description": "Randomly suggests a matching game from the collection.",
+      "fields": {
+        "players": {
+          "name": "Players",
+          "description": "Number of players."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "any, cooperative or competitive."
+        },
+        "game_type": {
+          "name": "Game type",
+          "description": "any, family, strategy, party, abstract, thematic, wargame or children."
+        },
+        "max_playtime": {
+          "name": "Max. duration (minutes)",
+          "description": "Only games up to this playing time."
+        }
+      }
+    },
+    "reject_suggestion": {
+      "name": "Reject suggestion",
+      "description": "Shows the next suggestion."
+    },
+    "accept_suggestion": {
+      "name": "Accept suggestion",
+      "description": "Accepts the suggestion (location is shown)."
+    },
+    "reset_suggestion": {
+      "name": "Reset suggestion",
+      "description": "Resets the selection."
     }
   }
 }

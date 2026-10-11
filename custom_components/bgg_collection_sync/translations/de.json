@@ -31,15 +31,34 @@
       "init": {
         "data": {
           "interval_hours": "Sync-Intervall (Stunden)",
-          "only_owned": "Nur Spiele im Besitz synchronisieren"
+          "only_owned": "Nur Spiele im Besitz synchronisieren",
+          "include_expansions": "Erweiterungen mitsynchronisieren und verknüpfen",
+          "media_player": "Wiedergabegerät für Playlists",
+          "end_scene": "Szene/Skript bei Spielende"
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "collection": { "name": "Sammlung" },
-      "last_sync": { "name": "Letzte Synchronisierung" }
+      "collection": {
+        "name": "Sammlung"
+      },
+      "last_sync": {
+        "name": "Letzte Synchronisierung"
+      },
+      "expansions": {
+        "name": "Erweiterungen"
+      },
+      "plays": {
+        "name": "Partien"
+      },
+      "session": {
+        "name": "Spielsitzung"
+      },
+      "suggestion": {
+        "name": "Vorschlag"
+      }
     }
   },
   "services": {
@@ -49,7 +68,7 @@
     },
     "get_games": {
       "name": "Spiele abrufen",
-      "description": "Liefert die gespeicherten Spiele inkl. Sprache der gewählten Version.",
+      "description": "Liefert die gespeicherten Spiele und Erweiterungen inkl. Sprache der gewählten Version und Verknüpfungen.",
       "fields": {
         "language": {
           "name": "Sprache",
@@ -58,8 +77,182 @@
         "entry_id": {
           "name": "Eintrag",
           "description": "Nur diesen BGG-Account abfragen."
+        },
+        "type": {
+          "name": "Typ",
+          "description": "all = Spiele und Erweiterungen, games = nur Basisspiele, expansions = nur Erweiterungen."
         }
       }
+    },
+    "set_game_meta": {
+      "name": "Spiel-Zuordnung setzen",
+      "description": "Weist einem Spiel Standort, NFC-Tag, Spotify-Playlist und Lichtprofil zu.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels (alternativ zum Namen)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Spielname (eindeutiger Teil genügt)."
+        },
+        "location": {
+          "name": "Standort",
+          "description": "Wo das Spiel liegt, z. B. \"Regal 2, Fach 3\". Leer = löschen."
+        },
+        "nfc_tag": {
+          "name": "NFC-Tag",
+          "description": "Tag-ID aus Einstellungen → Tags. Leer = löschen."
+        },
+        "spotify_uri": {
+          "name": "Spotify-Playlist",
+          "description": "Spotify-Link oder -URI. Leer = löschen."
+        },
+        "light_scene": {
+          "name": "Lichtprofil",
+          "description": "Szene oder Skript, das beim Spielstart aktiviert wird. Leer = löschen."
+        }
+      }
+    },
+    "assign_scanned_tag": {
+      "name": "Gescannten Tag zuordnen",
+      "description": "Ordnet den zuletzt gescannten NFC-Tag (letzte 10 Min.) dem Spiel zu.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels (alternativ zum Namen)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Spielname (eindeutiger Teil genügt)."
+        }
+      }
+    },
+    "start_play": {
+      "name": "Partie starten",
+      "description": "Startet das Logging; ohne Spielangabe wird der akzeptierte Vorschlag genutzt. Aktiviert Licht und Playlist.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels (alternativ zum Namen)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Spielname (eindeutiger Teil genügt)."
+        },
+        "players": {
+          "name": "Spieleranzahl",
+          "description": "Anzahl der Mitspielenden."
+        }
+      }
+    },
+    "end_play": {
+      "name": "Partie beenden",
+      "description": "Beendet die laufende Partie und speichert die Dauer.",
+      "fields": {
+        "winner": {
+          "name": "Gewinner",
+          "description": "Wer hat gewonnen (optional)."
+        },
+        "note": {
+          "name": "Notiz",
+          "description": "Freitext zur Partie (optional)."
+        },
+        "players": {
+          "name": "Spieleranzahl",
+          "description": "Anzahl der Mitspielenden."
+        }
+      }
+    },
+    "cancel_play": {
+      "name": "Partie verwerfen",
+      "description": "Verwirft die laufende Partie ohne Eintrag."
+    },
+    "log_play": {
+      "name": "Partie nachtragen",
+      "description": "Trägt eine bereits gespielte Partie manuell ein.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels (alternativ zum Namen)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Spielname (eindeutiger Teil genügt)."
+        },
+        "played_at": {
+          "name": "Zeitpunkt",
+          "description": "Wann gespielt wurde (Standard: jetzt)."
+        },
+        "duration_min": {
+          "name": "Dauer (Minuten)",
+          "description": "Dauer der Partie."
+        },
+        "players": {
+          "name": "Spieleranzahl",
+          "description": "Anzahl der Mitspielenden."
+        },
+        "winner": {
+          "name": "Gewinner",
+          "description": "Wer hat gewonnen (optional)."
+        },
+        "note": {
+          "name": "Notiz",
+          "description": "Freitext zur Partie (optional)."
+        }
+      }
+    },
+    "get_plays": {
+      "name": "Partien abrufen",
+      "description": "Liefert die gespeicherten Partien (optional für ein Spiel).",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels (alternativ zum Namen)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Spielname (eindeutiger Teil genügt)."
+        },
+        "limit": {
+          "name": "Anzahl",
+          "description": "Maximale Anzahl Partien."
+        }
+      }
+    },
+    "suggest_game": {
+      "name": "Spiel vorschlagen",
+      "description": "Schlägt zufällig ein passendes Spiel aus der Sammlung vor.",
+      "fields": {
+        "players": {
+          "name": "Spieleranzahl",
+          "description": "Anzahl der Mitspielenden."
+        },
+        "mode": {
+          "name": "Modus",
+          "description": "any = egal, cooperative = kooperativ, competitive = kompetitiv."
+        },
+        "game_type": {
+          "name": "Spieletyp",
+          "description": "any, family, strategy, party, abstract, thematic, wargame oder children."
+        },
+        "max_playtime": {
+          "name": "Max. Dauer (Minuten)",
+          "description": "Nur Spiele bis zu dieser Spieldauer."
+        }
+      }
+    },
+    "reject_suggestion": {
+      "name": "Vorschlag ablehnen",
+      "description": "Zeigt den nächsten Vorschlag."
+    },
+    "accept_suggestion": {
+      "name": "Vorschlag annehmen",
+      "description": "Nimmt den Vorschlag an (Standort wird angezeigt)."
+    },
+    "reset_suggestion": {
+      "name": "Vorschlag zurücksetzen",
+      "description": "Setzt die Auswahl zurück."
     }
   }
 }

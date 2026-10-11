@@ -1,4 +1,4 @@
-"""BGG Collection Sync: BoardGameGeek-Sammlung in Home Assistant + SQLite."""
+"""BGG Collection Sync: BoardGameGeek-Sammlung, Standorte, Partien und Spielvorschläge."""
 from __future__ import annotations
 
 import voluptuous as vol
@@ -9,6 +9,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
 
 from .api import BggClient
 from .const import (
@@ -21,14 +22,68 @@ from .const import (
 )
 from .coordinator import BggCoordinator
 from .db import BggDatabase
+from .logic import GAME_TYPES, MODES
 
 PLATFORMS = ["sensor"]
 
 type BggConfigEntry = ConfigEntry[BggCoordinator]
 
+_ENTRY = {vol.Optional("entry_id"): cv.string}
+_GAME = {**_ENTRY, vol.Optional("bgg_id"): vol.Coerce(int), vol.Optional("name"): cv.string}
+_PLAYERS = vol.All(vol.Coerce(int), vol.Range(min=1, max=99))
+
 GET_GAMES_SCHEMA = vol.Schema(
-    {vol.Optional("language"): cv.string, vol.Optional("entry_id"): cv.string}
+    {
+        vol.Optional("language"): cv.string,
+        vol.Optional("type", default="all"): vol.In(["all", "games", "expansions"]),
+        **_ENTRY,
+    }
 )
+SET_META_SCHEMA = vol.Schema(
+    {
+        **_GAME,
+        vol.Optional("location"): cv.string,
+        vol.Optional("nfc_tag"): cv.string,
+        vol.Optional("spotify_uri"): cv.string,
+        vol.Optional("light_scene"): cv.string,
+    }
+)
+START_PLAY_SCHEMA = vol.Schema({**_GAME, vol.Optional("players"): _PLAYERS})
+END_PLAY_SCHEMA = vol.Schema(
+    {
+        **_ENTRY,
+        vol.Optional("winner"): cv.string,
+        vol.Optional("note"): cv.string,
+        vol.Optional("players"): _PLAYERS,
+    }
+)
+LOG_PLAY_SCHEMA = vol.Schema(
+    {
+        **_GAME,
+        vol.Optional("played_at"): cv.datetime,
+        vol.Optional("duration_min"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+        vol.Optional("players"): _PLAYERS,
+        vol.Optional("winner"): cv.string,
+        vol.Optional("note"): cv.string,
+    }
+)
+GET_PLAYS_SCHEMA = vol.Schema(
+    {
+        **_GAME,
+        vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=500)),
+    }
+)
+SUGGEST_SCHEMA = vol.Schema(
+    {
+        **_ENTRY,
+        vol.Optional("players"): _PLAYERS,
+        vol.Optional("mode", default="any"): vol.In(MODES),
+        vol.Optional("game_type", default="any"): vol.In(GAME_TYPES),
+        vol.Optional("max_playtime"): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+    }
+)
+ENTRY_ONLY_SCHEMA = vol.Schema(_ENTRY)
+ASSIGN_TAG_SCHEMA = vol.Schema(_GAME)
 
 
 def _loaded_entries(hass: HomeAssistant, entry_id: str | None = None) -> list[BggConfigEntry]:
@@ -42,6 +97,14 @@ def _loaded_entries(hass: HomeAssistant, entry_id: str | None = None) -> list[Bg
     return entries
 
 
+def _coordinator(hass: HomeAssistant, call: ServiceCall) -> BggCoordinator:
+    return _loaded_entries(hass, call.data.get("entry_id"))[0].runtime_data
+
+
+def _game(coordinator: BggCoordinator, call: ServiceCall) -> dict:
+    return coordinator.manager.find_game(call.data.get("bgg_id"), call.data.get("name"))
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle_sync_now(call: ServiceCall) -> None:
         for entry in _loaded_entries(hass):
@@ -49,14 +112,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     async def handle_get_games(call: ServiceCall) -> dict:
         wanted = (call.data.get("language") or "").strip().lower()
+        kind = call.data["type"]
         games = []
         for entry in _loaded_entries(hass, call.data.get("entry_id")):
-            for game in entry.runtime_data.data["games"]:
+            data = entry.runtime_data.data
+            pool = []
+            if kind in ("all", "games"):
+                pool += [("game", g) for g in data["games"]]
+            if kind in ("all", "expansions"):
+                pool += [("expansion", g) for g in data["expansions"]]
+            for item_type, game in pool:
                 if wanted and wanted not in (lang.lower() for lang in game["languages"]):
                     continue
                 games.append(
                     {
                         "username": entry.data[CONF_USERNAME],
+                        "type": item_type,
                         "bgg_id": game["bgg_id"],
                         "name": game["name"],
                         "year": game["year"],
@@ -66,18 +137,113 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         "num_plays": game["num_plays"],
                         "user_rating": game["user_rating"],
                         "thumbnail": game["thumbnail"],
+                        "location": game["location"],
+                        "nfc_tag": game["nfc_tag"],
+                        "spotify_uri": game["spotify_uri"],
+                        "light_scene": game["light_scene"],
+                        "min_players": game["min_players"],
+                        "max_players": game["max_players"],
+                        "playing_time": game["playing_time"],
+                        "mode": game["mode"],
+                        "game_types": game["game_types"],
+                        "expansions": game["expansions"],
+                        "base_games": game["base_games"],
                     }
                 )
         return {"count": len(games), "games": games}
 
-    hass.services.async_register(DOMAIN, SERVICE_SYNC_NOW, handle_sync_now)
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_GET_GAMES,
-        handle_get_games,
-        schema=GET_GAMES_SCHEMA,
-        supports_response=SupportsResponse.ONLY,
-    )
+    async def handle_set_meta(call: ServiceCall) -> None:
+        c = _coordinator(hass, call)
+        fields = {
+            k: call.data[k]
+            for k in ("location", "nfc_tag", "spotify_uri", "light_scene")
+            if k in call.data
+        }
+        if not fields:
+            raise ServiceValidationError(
+                "Mindestens location, nfc_tag, spotify_uri oder light_scene angeben"
+            )
+        await c.manager.async_set_meta(_game(c, call), fields)
+
+    async def handle_assign_tag(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        return {"nfc_tag": await c.manager.async_assign_scanned_tag(_game(c, call))}
+
+    async def handle_start_play(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        game = _game(c, call) if ("bgg_id" in call.data or "name" in call.data) else None
+        return await c.manager.async_start_play(game, call.data.get("players"))
+
+    async def handle_end_play(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        return await c.manager.async_end_play(
+            call.data.get("winner"), call.data.get("note"), call.data.get("players")
+        )
+
+    async def handle_cancel_play(call: ServiceCall) -> None:
+        await _coordinator(hass, call).manager.async_cancel_play()
+
+    async def handle_log_play(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        played_at = call.data.get("played_at")
+        return await c.manager.async_log_play(
+            _game(c, call),
+            dt_util.as_utc(played_at) if played_at else None,
+            call.data.get("duration_min"),
+            call.data.get("players"),
+            call.data.get("winner"),
+            call.data.get("note"),
+        )
+
+    async def handle_get_plays(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        bgg_id = None
+        if "bgg_id" in call.data or "name" in call.data:
+            bgg_id = _game(c, call)["bgg_id"]
+        plays = await c.manager.async_get_plays(bgg_id, call.data["limit"])
+        return {"count": len(plays), "plays": plays}
+
+    async def handle_suggest(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        return dict(
+            c.manager.suggest(
+                call.data.get("players"),
+                call.data["mode"],
+                call.data["game_type"],
+                call.data.get("max_playtime"),
+            )
+        )
+
+    async def handle_reject(call: ServiceCall) -> None:
+        _coordinator(hass, call).manager.reject()
+
+    async def handle_accept(call: ServiceCall) -> None:
+        _coordinator(hass, call).manager.accept()
+
+    async def handle_reset(call: ServiceCall) -> None:
+        _coordinator(hass, call).manager.reset()
+
+    reg = hass.services.async_register
+    reg(DOMAIN, SERVICE_SYNC_NOW, handle_sync_now)
+    reg(DOMAIN, SERVICE_GET_GAMES, handle_get_games, schema=GET_GAMES_SCHEMA,
+        supports_response=SupportsResponse.ONLY)
+    reg(DOMAIN, "set_game_meta", handle_set_meta, schema=SET_META_SCHEMA)
+    reg(DOMAIN, "assign_scanned_tag", handle_assign_tag, schema=ASSIGN_TAG_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "start_play", handle_start_play, schema=START_PLAY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "end_play", handle_end_play, schema=END_PLAY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "cancel_play", handle_cancel_play, schema=ENTRY_ONLY_SCHEMA)
+    reg(DOMAIN, "log_play", handle_log_play, schema=LOG_PLAY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "get_plays", handle_get_plays, schema=GET_PLAYS_SCHEMA,
+        supports_response=SupportsResponse.ONLY)
+    reg(DOMAIN, "suggest_game", handle_suggest, schema=SUGGEST_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "reject_suggestion", handle_reject, schema=ENTRY_ONLY_SCHEMA)
+    reg(DOMAIN, "accept_suggestion", handle_accept, schema=ENTRY_ONLY_SCHEMA)
+    reg(DOMAIN, "reset_suggestion", handle_reset, schema=ENTRY_ONLY_SCHEMA)
     return True
 
 
@@ -93,6 +259,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: BggConfigEntry) -> bool:
     coordinator = BggCoordinator(hass, entry, client, db)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+
+    coordinator.manager.async_start()
+    entry.async_on_unload(coordinator.manager.async_stop)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))

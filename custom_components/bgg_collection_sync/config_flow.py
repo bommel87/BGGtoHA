@@ -7,14 +7,19 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import BggAuthError, BggClient, BggError, BggNotFoundError
 from .const import (
+    CONF_END_SCENE,
+    CONF_INCLUDE_EXPANSIONS,
     CONF_INTERVAL_HOURS,
+    CONF_MEDIA_PLAYER,
     CONF_ONLY_OWNED,
     CONF_TOKEN,
     CONF_USERNAME,
+    DEFAULT_INCLUDE_EXPANSIONS,
     DEFAULT_INTERVAL_HOURS,
     DEFAULT_ONLY_OWNED,
     DOMAIN,
@@ -105,6 +110,22 @@ class BggOptionsFlow(OptionsFlow):
                         CONF_ONLY_OWNED,
                         default=opts.get(CONF_ONLY_OWNED, DEFAULT_ONLY_OWNED),
                     ): bool,
+                    vol.Required(
+                        CONF_INCLUDE_EXPANSIONS,
+                        default=opts.get(CONF_INCLUDE_EXPANSIONS, DEFAULT_INCLUDE_EXPANSIONS),
+                    ): bool,
+                    vol.Optional(
+                        CONF_MEDIA_PLAYER,
+                        description={"suggested_value": opts.get(CONF_MEDIA_PLAYER)},
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="media_player")
+                    ),
+                    vol.Optional(
+                        CONF_END_SCENE,
+                        description={"suggested_value": opts.get(CONF_END_SCENE)},
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain=["scene", "script"])
+                    ),
                 }
             ),
         )

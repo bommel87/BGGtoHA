@@ -1,0 +1,340 @@
+# UI-Logik: Auswahl -> Vorschlag -> Ablehnen/Zusagen -> Standort + Start -> Partie läuft.
+# Der Zustand (Phase, Name, Standort ...) kommt aus Home Assistant, das Display ist zustandslos.
+
+font:
+  - file: "gfonts://Roboto"
+    id: roboto_28
+    size: 28
+    glyphs: "!\"#%&'()+,-./0123456789:?ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyzäöüÄÖÜß|"
+
+text_sensor:
+  # --- Vorschlag ---
+  - platform: homeassistant
+    id: ha_phase
+    entity_id: ${suggestion_entity}
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x == "suggested";'
+            then:
+              - lvgl.page.show: page_suggest
+        - if:
+            condition:
+              lambda: 'return x == "accepted";'
+            then:
+              - lvgl.page.show: page_accepted
+        - if:
+            condition:
+              lambda: 'return x == "none";'
+            then:
+              - lvgl.page.show: page_none
+        - if:
+            condition:
+              lambda: 'return x == "idle" && id(ha_session).state != "running";'
+            then:
+              - lvgl.page.show: page_select
+
+  - platform: homeassistant
+    id: ha_name
+    entity_id: ${suggestion_entity}
+    attribute: name
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_sug_name
+            text: !lambda 'return x;'
+        - lvgl.label.update:
+            id: lbl_acc_name
+            text: !lambda 'return x;'
+
+  - platform: homeassistant
+    id: ha_summary
+    entity_id: ${suggestion_entity}
+    attribute: summary
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_sug_summary
+            text: !lambda 'return x;'
+
+  - platform: homeassistant
+    id: ha_location
+    entity_id: ${suggestion_entity}
+    attribute: location
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_acc_location
+            text: !lambda 'return x.empty() ? std::string("Kein Standort hinterlegt") : x;'
+
+  # --- laufende Partie ---
+  - platform: homeassistant
+    id: ha_session
+    entity_id: ${session_entity}
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x == "running";'
+            then:
+              - lvgl.page.show: page_running
+        - if:
+            condition:
+              lambda: 'return x != "running" && id(ha_phase).state == "idle";'
+            then:
+              - lvgl.page.show: page_select
+
+  - platform: homeassistant
+    id: ha_session_name
+    entity_id: ${session_entity}
+    attribute: name
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_run_name
+            text: !lambda 'return x;'
+
+lvgl:
+  default_font: roboto_28
+  displays:
+    - main_display
+  touchscreens:
+    - main_touch
+  pages:
+    # ------------------------------------------------------------ Auswahl
+    - id: page_select
+      widgets:
+        - label:
+            text: "Was spielen wir?"
+            align: TOP_MID
+            y: 14
+        - label:
+            text: "Modus"
+            align: TOP_LEFT
+            x: 6
+            y: 64
+            text_font: montserrat_16
+        - label:
+            text: "Typ"
+            align: TOP_MID
+            y: 64
+            text_font: montserrat_16
+        - label:
+            text: "Spieler"
+            align: TOP_RIGHT
+            x: -6
+            y: 64
+            text_font: montserrat_16
+        - roller:
+            id: roller_mode
+            options: ["Egal", "Koop", "Wettkampf"]
+            visible_row_count: 3
+            width: 31%
+            align: TOP_LEFT
+            x: 4
+            y: 92
+            text_font: montserrat_18
+        - roller:
+            id: roller_type
+            options: ["Egal", "Familie", "Strategie", "Party", "Abstrakt", "Thematisch", "Wargame", "Kinder"]
+            visible_row_count: 3
+            width: 31%
+            align: TOP_MID
+            y: 92
+            text_font: montserrat_18
+        - roller:
+            id: roller_players
+            options: ["1", "2", "3", "4", "5", "6", "7", "8"]
+            selected_index: 3
+            visible_row_count: 3
+            width: 31%
+            align: TOP_RIGHT
+            x: -4
+            y: 92
+            text_font: montserrat_18
+        - button:
+            id: btn_suggest
+            width: 85%
+            height: 64
+            align: BOTTOM_MID
+            y: -16
+            widgets:
+              - label:
+                  text: "Vorschlag"
+                  align: CENTER
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.suggest_game
+                  data_template:
+                    mode: "{{ mode }}"
+                    game_type: "{{ gtype }}"
+                    players: "{{ players }}"
+                  variables:
+                    mode: |-
+                      static const char *v[] = {"any", "cooperative", "competitive"};
+                      return std::string(v[lv_roller_get_selected(id(roller_mode))]);
+                    gtype: |-
+                      static const char *v[] = {"any", "family", "strategy", "party",
+                                                "abstract", "thematic", "wargame", "children"};
+                      return std::string(v[lv_roller_get_selected(id(roller_type))]);
+                    players: |-
+                      return std::to_string(lv_roller_get_selected(id(roller_players)) + 1);
+
+    # ------------------------------------------------------------ Vorschlag
+    - id: page_suggest
+      widgets:
+        - label:
+            text: "Wie waere es mit"
+            align: TOP_MID
+            y: 20
+            text_font: montserrat_18
+        - label:
+            id: lbl_sug_name
+            text: "-"
+            width: 92%
+            long_mode: WRAP
+            text_align: CENTER
+            align: CENTER
+            y: -40
+        - label:
+            id: lbl_sug_summary
+            text: ""
+            width: 92%
+            long_mode: WRAP
+            text_align: CENTER
+            align: CENTER
+            y: 50
+            text_font: montserrat_18
+        - button:
+            id: btn_reject
+            width: 42%
+            height: 64
+            align: BOTTOM_LEFT
+            x: 12
+            y: -16
+            widgets:
+              - label:
+                  text: "Nein"
+                  align: CENTER
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.reject_suggestion
+        - button:
+            id: btn_accept
+            width: 42%
+            height: 64
+            align: BOTTOM_RIGHT
+            x: -12
+            y: -16
+            widgets:
+              - label:
+                  text: "Ja"
+                  align: CENTER
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.accept_suggestion
+
+    # ------------------------------------------------------------ Zugesagt
+    - id: page_accepted
+      widgets:
+        - label:
+            id: lbl_acc_name
+            text: "-"
+            width: 92%
+            long_mode: WRAP
+            text_align: CENTER
+            align: TOP_MID
+            y: 20
+        - label:
+            text: "Standort"
+            align: CENTER
+            y: -50
+            text_font: montserrat_18
+        - label:
+            id: lbl_acc_location
+            text: ""
+            width: 92%
+            long_mode: WRAP
+            text_align: CENTER
+            align: CENTER
+            y: 10
+        - button:
+            id: btn_back
+            width: 30%
+            height: 64
+            align: BOTTOM_LEFT
+            x: 12
+            y: -16
+            widgets:
+              - label:
+                  text: "Zurueck"
+                  align: CENTER
+                  text_font: montserrat_18
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.reset_suggestion
+        - button:
+            id: btn_start
+            width: 58%
+            height: 64
+            align: BOTTOM_RIGHT
+            x: -12
+            y: -16
+            widgets:
+              - label:
+                  text: "Start"
+                  align: CENTER
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.start_play
+
+    # ------------------------------------------------------------ Kein Treffer
+    - id: page_none
+      widgets:
+        - label:
+            text: "Keine (weiteren) Spiele gefunden"
+            width: 92%
+            long_mode: WRAP
+            text_align: CENTER
+            align: CENTER
+        - button:
+            width: 85%
+            height: 64
+            align: BOTTOM_MID
+            y: -16
+            widgets:
+              - label:
+                  text: "Neu waehlen"
+                  align: CENTER
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.reset_suggestion
+
+    # ------------------------------------------------------------ Läuft
+    - id: page_running
+      widgets:
+        - label:
+            text: "Partie laeuft"
+            align: TOP_MID
+            y: 20
+            text_font: montserrat_18
+        - label:
+            id: lbl_run_name
+            text: "-"
+            width: 92%
+            long_mode: WRAP
+            text_align: CENTER
+            align: CENTER
+        - button:
+            width: 85%
+            height: 64
+            align: BOTTOM_MID
+            y: -16
+            widgets:
+              - label:
+                  text: "Beenden"
+                  align: CENTER
+            on_click:
+              - homeassistant.action:
+                  action: bgg_collection_sync.end_play

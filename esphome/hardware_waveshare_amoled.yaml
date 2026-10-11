@@ -1,0 +1,22 @@
+# PLATZHALTER - Display, Touch und Pins hängen vom exakten Waveshare-Modell ab
+# (z. B. ESP32-S3-Touch-AMOLED-1.8 / 1.64 / 2.06 haben unterschiedliche Treiber und Pins).
+#
+# Diese Datei muss zwei Dinge bereitstellen, die ui.yaml verwendet:
+#   - eine Anzeige mit   id: main_display
+#   - einen Touchscreen mit   id: main_touch
+#
+# Skizze (NICHT lauffähig, bitte an das Modell anpassen; Pins/Treiber im Waveshare-Wiki
+# bzw. ESPHome-Doku zu "display" und "touchscreen" nachschlagen):
+#
+# spi:            # QSPI-Bus des AMOLED
+#   ...
+# i2c:            # Touch-Controller (+ ggf. IO-Expander/PMIC)
+#   ...
+# display:
+#   - platform: ...
+#     id: main_display
+#     ...
+# touchscreen:
+#   - platform: ...
+#     id: main_touch
+#     ...

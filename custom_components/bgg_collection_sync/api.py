@@ -5,6 +5,7 @@ import asyncio
 import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from typing import Any
 
 import aiohttp
 
@@ -15,6 +16,27 @@ USER_AGENT = "HomeAssistant-bgg-collection-sync/0.1.0"
 MAX_ATTEMPTS = 8
 RETRY_DELAY = 5  # Sekunden (BGG antwortet bei Collections zuerst oft mit 202)
 THING_BATCH_SIZE = 20  # BGG erlaubt max. 20 IDs pro /thing-Abfrage
+EXPANSION = "boardgameexpansion"
+
+# BGG-Subdomains (Rank-Namen) -> interner Spieletyp
+SUBDOMAIN_TYPES = {
+    "strategygames": "strategy",
+    "familygames": "family",
+    "partygames": "party",
+    "abstracts": "abstract",
+    "thematic": "thematic",
+    "wargames": "wargame",
+    "childrensgames": "children",
+}
+# Fallback für nicht gerankte Spiele
+CATEGORY_TYPES = {
+    "Party Game": "party",
+    "Children's Game": "children",
+    "Abstract Strategy": "abstract",
+    "Wargame": "wargame",
+}
+MECHANIC_COOP = "Cooperative Game"
+MECHANIC_SEMI = "Semi-Cooperative Game"
 
 
 class BggError(Exception):
@@ -48,6 +70,7 @@ class CollectionItem:
     version_id: int | None = None
     version_name: str | None = None
     languages: list[str] = field(default_factory=list)  # falls die Collection sie liefert
+    subtype: str = "boardgame"
 
 
 @dataclass
@@ -68,11 +91,27 @@ def _to_int(value) -> int | None:
         return None
 
 
+def _child_int(el: ET.Element, tag: str) -> int | None:
+    child = el.find(tag)
+    return _to_int(child.get("value")) if child is not None else None
+
+
 def _to_float(value) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+@dataclass
+class ThingData:
+    """Ergebnis einer /thing-Abfrage."""
+
+    versions: list[VersionInfo]
+    # Erweiterung -> Liste der Basisspiele (id, name), die sie erweitert
+    base_links: dict[int, list[tuple[int, str]]]
+    # Spielinfos (Spielerzahl, Dauer, Typ, Modus ...) je BGG-ID
+    info: dict[int, dict[str, Any]]
 
 
 class BggClient:
@@ -125,14 +164,21 @@ class BggClient:
         if not root.get("id"):
             raise BggNotFoundError(self.username)
 
-    async def fetch_collection(self, only_owned: bool) -> list[CollectionItem]:
-        """Lädt die Collection inkl. der in der Collection gewählten Version."""
+    async def fetch_collection(
+        self, only_owned: bool, expansions: bool = False
+    ) -> list[CollectionItem]:
+        """Lädt Spiele (oder Erweiterungen) inkl. der in der Collection gewählten Version."""
         params: dict = {
             "username": self.username,
-            "subtype": "boardgame",
             "version": 1,
             "stats": 1,
         }
+        if expansions:
+            params["subtype"] = EXPANSION
+        else:
+            # BGG liefert Erweiterungen sonst im Standard-Subtype mit
+            params["subtype"] = "boardgame"
+            params["excludesubtype"] = EXPANSION
         if only_owned:
             params["own"] = 1
         root = await self._get("collection", params)
@@ -177,23 +223,68 @@ class BggClient:
             version_id=version_id,
             version_name=version_name,
             languages=languages,
+            subtype=item.get("subtype") or "boardgame",
         )
 
-    async def fetch_versions(self, game_ids: list[int]) -> list[VersionInfo]:
-        """Lädt alle Versionen (inkl. Sprachen) für bis zu 20 Spiele."""
+    async def fetch_things(self, ids: list[int]) -> ThingData:
+        """Lädt Versionen, Erweiterungs-Verknüpfungen und Spielinfos für bis zu 20 IDs."""
         root = await self._get(
-            "thing", {"id": ",".join(map(str, game_ids)), "versions": 1}
+            "thing", {"id": ",".join(map(str, ids)), "versions": 1, "stats": 1}
         )
-        result: list[VersionInfo] = []
+        versions: list[VersionInfo] = []
+        base_links: dict[int, list[tuple[int, str]]] = {}
+        info: dict[int, dict[str, Any]] = {}
         for game in root.findall("item"):
             game_id = _to_int(game.get("id"))
+            if game_id is None:
+                continue
+
+            # inbound="true" bei einer Erweiterung = Basisspiel(e), die sie erweitert
+            for link in game.findall("link[@type='boardgameexpansion']"):
+                base_id = _to_int(link.get("id"))
+                if link.get("inbound") == "true" and base_id is not None:
+                    base_links.setdefault(game_id, []).append(
+                        (base_id, link.get("value") or "")
+                    )
+
+            categories = [
+                l.get("value") for l in game.findall("link[@type='boardgamecategory']")
+            ]
+            mechanics = [
+                l.get("value") for l in game.findall("link[@type='boardgamemechanic']")
+            ]
+            types = {CATEGORY_TYPES[c] for c in categories if c in CATEGORY_TYPES}
+            for rank in game.findall("statistics/ratings/ranks/rank[@type='family']"):
+                kind = SUBDOMAIN_TYPES.get(rank.get("name"))
+                if kind and rank.get("value") not in (None, "Not Ranked"):
+                    types.add(kind)
+            if MECHANIC_COOP in mechanics:
+                mode = "cooperative"
+            elif MECHANIC_SEMI in mechanics:
+                mode = "semi"
+            else:
+                mode = "competitive"
+            weight_el = game.find("statistics/ratings/averageweight")
+            info[game_id] = {
+                "min_players": _child_int(game, "minplayers"),
+                "max_players": _child_int(game, "maxplayers"),
+                "min_playtime": _child_int(game, "minplaytime"),
+                "max_playtime": _child_int(game, "maxplaytime"),
+                "playing_time": _child_int(game, "playingtime"),
+                "weight": _to_float(weight_el.get("value")) if weight_el is not None else None,
+                "categories": categories,
+                "mechanics": mechanics,
+                "game_types": sorted(types),
+                "mode": mode,
+            }
+
             for ver in game.findall("versions/item"):
                 version_id = _to_int(ver.get("id"))
-                if game_id is None or version_id is None:
+                if version_id is None:
                     continue
                 name_el = ver.find("name")
                 year_el = ver.find("yearpublished")
-                result.append(
+                versions.append(
                     VersionInfo(
                         version_id=version_id,
                         bgg_id=game_id,
@@ -206,4 +297,4 @@ class BggClient:
                         ],
                     )
                 )
-        return result
+        return ThingData(versions=versions, base_links=base_links, info=info)
