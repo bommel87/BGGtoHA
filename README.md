@@ -1,5 +1,7 @@
 # BGG Collection Sync (Home Assistant / HACS)
 
+## Test mit Claude geschrieben###
+
 Synchronisiert deine BoardGameGeek-Sammlung **und Erweiterungen** nach Home Assistant (SQLite-Datenbank), mit
 Sprache der gewählten Version, Verknüpfung Erweiterung ⇄ Basisspiel, **Standort / NFC-Tag / Spotify-Playlist /
 Lichtprofil je Spiel**, **Partien-Logging** und einem **Spielvorschlag** (z. B. für ein ESP32-Touch-Display).
