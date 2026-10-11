@@ -1,0 +1,12 @@
+sync_now:
+
+get_games:
+  fields:
+    language:
+      example: "German"
+      selector:
+        text:
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync

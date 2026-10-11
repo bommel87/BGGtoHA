@@ -1,0 +1,54 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect BoardGameGeek",
+        "description": "Enter your BGG username. Since 2025 BGG requires an API token (bearer) for the XML API.",
+        "data": { "username": "BGG username", "token": "API token" }
+      },
+      "reauth_confirm": {
+        "title": "New API token required",
+        "data": { "token": "API token" }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to BoardGameGeek",
+      "invalid_auth": "Token missing or invalid",
+      "user_not_found": "User not found on BGG"
+    },
+    "abort": {
+      "already_configured": "This user is already configured",
+      "reauth_successful": "Token updated"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "interval_hours": "Sync interval (hours)",
+          "only_owned": "Only sync owned games"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "collection": { "name": "Collection" },
+      "last_sync": { "name": "Last sync" }
+    }
+  },
+  "services": {
+    "sync_now": {
+      "name": "Sync now",
+      "description": "Starts a sync with BoardGameGeek immediately."
+    },
+    "get_games": {
+      "name": "Get games",
+      "description": "Returns the stored games including the language of the selected version.",
+      "fields": {
+        "language": { "name": "Language", "description": "Only games whose selected version has this language (BGG name, e.g. German)." },
+        "entry_id": { "name": "Entry", "description": "Only query this BGG account." }
+      }
+    }
+  }
+}

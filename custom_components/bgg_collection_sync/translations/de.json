@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BoardGameGeek verbinden",
+        "description": "Gib deinen BGG-Benutzernamen an. Seit 2025 verlangt BGG für die XML-API einen API-Token (Bearer).",
+        "data": {
+          "username": "BGG-Benutzername",
+          "token": "API-Token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Neuer API-Token nötig",
+        "data": {
+          "token": "API-Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zu BoardGameGeek fehlgeschlagen",
+      "invalid_auth": "Token fehlt oder ist ungültig",
+      "user_not_found": "Benutzer wurde bei BGG nicht gefunden"
+    },
+    "abort": {
+      "already_configured": "Dieser Benutzer ist bereits eingerichtet",
+      "reauth_successful": "Token aktualisiert"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "interval_hours": "Sync-Intervall (Stunden)",
+          "only_owned": "Nur Spiele im Besitz synchronisieren"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "collection": { "name": "Sammlung" },
+      "last_sync": { "name": "Letzte Synchronisierung" }
+    }
+  },
+  "services": {
+    "sync_now": {
+      "name": "Jetzt synchronisieren",
+      "description": "Startet sofort eine Synchronisierung mit BoardGameGeek."
+    },
+    "get_games": {
+      "name": "Spiele abrufen",
+      "description": "Liefert die gespeicherten Spiele inkl. Sprache der gewählten Version.",
+      "fields": {
+        "language": {
+          "name": "Sprache",
+          "description": "Nur Spiele, deren gewählte Version diese Sprache hat (englischer BGG-Name, z. B. German)."
+        },
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account abfragen."
+        }
+      }
+    }
+  }
+}
