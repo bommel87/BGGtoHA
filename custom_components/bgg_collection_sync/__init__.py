@@ -26,6 +26,9 @@ from .logic import GAME_TYPES, MODES
 
 PLATFORMS = ["sensor"]
 
+CARD_URL = "/bgg_collection_sync/bgg-shelf-card.js"
+CARD_VERSION = "0.4.0"
+
 type BggConfigEntry = ConfigEntry[BggCoordinator]
 
 _ENTRY = {vol.Optional("entry_id"): cv.string}
@@ -105,7 +108,16 @@ def _game(coordinator: BggCoordinator, call: ServiceCall) -> dict:
     return coordinator.manager.find_game(call.data.get("bgg_id"), call.data.get("name"))
 
 
+async def _async_register_card(hass: HomeAssistant) -> None:
+    """Lovelace-Karte (Billy-Regal) bereitstellen und automatisch laden."""
+    path = Path(__file__).parent / "frontend" / "bgg-shelf-card.js"
+    await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
+    add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    await _async_register_card(hass)
+
     async def handle_sync_now(call: ServiceCall) -> None:
         for entry in _loaded_entries(hass):
             await entry.runtime_data.async_refresh()

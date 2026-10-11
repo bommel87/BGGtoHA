@@ -29,7 +29,7 @@ const hash = (s) => {
 
 const naturalSort = (a, b) => a.localeCompare(b, "de", { numeric: true, sensitivity: "base" });
 
-export function parseLocation(raw) {
+function parseLocation(raw) {
   const loc = String(raw ?? "").trim();
   if (!loc) return { shelf: NO_LOCATION, fach: null };
   const m = loc.match(/(?:fach|boden|ebene)\s*(\d+)/i);
@@ -111,7 +111,7 @@ class BggShelfCard extends HTMLElement {
   _layout() {
     const shelves = new Map();
     const ensure = (name) => {
-      if (!shelves.has(name)) shelves.set(name, { name, fächer: new Map(), loose: [] });
+      if (!shelves.has(name)) shelves.set(name, { name, faecher: new Map(), loose: [] });
       return shelves.get(name);
     };
     (this._config.shelves || []).forEach((n) => ensure(String(n)));
@@ -125,8 +125,8 @@ class BggShelfCard extends HTMLElement {
       const s = ensure(shelf);
       if (fach == null) s.loose.push(g);
       else {
-        if (!s.fächer.has(fach)) s.fächer.set(fach, []);
-        s.fächer.get(fach).push(g);
+        if (!s.faecher.has(fach)) s.faecher.set(fach, []);
+        s.faecher.get(fach).push(g);
       }
     }
     const configured = (this._config.shelves || []).map(String);
@@ -138,7 +138,7 @@ class BggShelfCard extends HTMLElement {
     });
     const byName = (a, b) => naturalSort(a.name, b.name);
     list.forEach((s) => {
-      s.fächer.forEach((arr) => arr.sort(byName));
+      s.faecher.forEach((arr) => arr.sort(byName));
       s.loose.sort(byName);
     });
     unplaced.sort(byName);
@@ -171,14 +171,14 @@ class BggShelfCard extends HTMLElement {
   }
 
   _billy(s) {
-    const maxUsed = Math.max(0, ...s.fächer.keys());
+    const maxUsed = Math.max(0, ...s.faecher.keys());
     const count = Math.max(this._config.compartments, maxUsed);
     let rows = "";
     for (let f = 1; f <= count; f++) {
-      const games = s.fächer.get(f) || [];
+      const games = s.faecher.get(f) || [];
       rows += `<div class="fach"><span class="num">${f}</span>${this._stacks(games)}</div>`;
     }
-    const total = [...s.fächer.values()].reduce((n, a) => n + a.length, 0) + s.loose.length;
+    const total = [...s.faecher.values()].reduce((n, a) => n + a.length, 0) + s.loose.length;
     const loose = s.loose.length
       ? `<div class="loose"><div class="label">ohne Fach</div><div class="fach">${this._stacks(s.loose)}</div></div>`
       : "";
@@ -226,7 +226,7 @@ class BggShelfCard extends HTMLElement {
           <button id="save">Standort speichern</button>
           <button id="play" class="primary">Partie starten</button>
         </div>
-        <p class="msg" id="msg"></p>
+        <p class="msg" id="msg">${esc(this._msg || "")}</p>
       </div>
     </div>`;
   }
@@ -240,13 +240,14 @@ class BggShelfCard extends HTMLElement {
   }
 
   async _call(service, data, okMsg) {
-    const msg = this.shadowRoot.getElementById("msg");
     try {
       await this._hass.callService(DOMAIN, service, data);
-      if (msg) msg.textContent = okMsg;
+      this._msg = okMsg;
     } catch (err) {
-      if (msg) msg.textContent = err?.message || String(err);
+      this._msg = err?.message || String(err);
     }
+    const msg = this.shadowRoot.getElementById("msg");
+    if (msg) msg.textContent = this._msg;
   }
 
   _render() {
@@ -292,6 +293,7 @@ class BggShelfCard extends HTMLElement {
     root.querySelectorAll(".box").forEach((b) =>
       b.addEventListener("click", () => {
         this._selected = Number(b.dataset.id);
+        this._msg = "";
         this._render();
       })
     );
