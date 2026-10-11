@@ -54,6 +54,23 @@ den BGG-Subdomains bzw. Kategorien. Spiele ohne diese Daten werden bei gesetztem
 `Sammlung`, `Erweiterungen`, `Partien`, `Spielsitzung` (idle/running), `Vorschlag`
 (idle/suggested/accepted/none, Attribute: name, location, summary …), `Letzte Synchronisierung`.
 
+## Virtuelles Billy-Regal (Dashboard-Karte)
+Ab 0.4.0 bringt die Integration die Karte `bgg-shelf-card` mit. Sie wird automatisch geladen, eine Ressource muss
+nicht angelegt werden (nach dem Update einmal den Browser-Cache leeren bzw. die App neu laden).
+Dashboard bearbeiten → *Karte hinzufügen* → *BGG Spieleregal*, oder per YAML:
+```yaml
+type: custom:bgg-shelf-card
+title: Spieleregal
+compartments: 6          # Fächer pro Billy (Standard 6, oberstes = Fach 1)
+stack_size: 5            # Schachteln pro Stapel
+shelves: [Regal 1, Regal 2, Wohnzimmer]   # optional: Reihenfolge, auch leere Regale
+show_expansions: false   # Erweiterungen mit eigenem Standort mit einsortieren
+```
+Der Standort wird so gelesen: alles vor „Fach N“ ist der Regalname, N die Fachnummer von oben
+(`Regal 2, Fach 3`, `Wohnzimmer Fach 1`). Ohne Fachnummer landet das Spiel unter dem Regal („ohne Fach“), ohne
+Standort im Stapel „Ohne Standort“. Suche hebt Treffer hervor; ein Klick auf eine Schachtel zeigt Details,
+erlaubt den Standort zu ändern (`set_game_meta`) und eine Partie zu starten.
+
 ## ESP32 Touch AMOLED (ESPHome)
 Ordner `esphome/`: `bgg-picker.yaml` (Hauptdatei), `ui.yaml` (Auswahl → Vorschlag → Ja/Nein → Standort + Start →
 läuft/Beenden), `hardware_waveshare_amoled.yaml` (**Platzhalter** für Display/Touch deines Modells).
