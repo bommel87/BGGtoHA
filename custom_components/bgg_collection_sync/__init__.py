@@ -1,6 +1,9 @@
 """BGG Collection Sync: BoardGameGeek-Sammlung, Standorte, Partien und Spielvorschläge."""
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -23,6 +26,8 @@ from .const import (
 from .coordinator import BggCoordinator
 from .db import BggDatabase
 from .logic import GAME_TYPES, MODES
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
 
@@ -109,10 +114,23 @@ def _game(coordinator: BggCoordinator, call: ServiceCall) -> dict:
 
 
 async def _async_register_card(hass: HomeAssistant) -> None:
-    """Lovelace-Karte (Billy-Regal) bereitstellen und automatisch laden."""
-    path = Path(__file__).parent / "frontend" / "bgg-shelf-card.js"
-    await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
-    add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+    """Lovelace-Karte (Billy-Regal) bereitstellen und automatisch laden.
+
+    Fehler hier dürfen die Integration nicht blockieren – dann fehlt nur die Karte.
+    """
+    try:
+        from homeassistant.components.frontend import add_extra_js_url
+
+        path = str(Path(__file__).parent / "frontend" / "bgg-shelf-card.js")
+        try:
+            from homeassistant.components.http import StaticPathConfig
+
+            await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, path, False)])
+        except ImportError:  # HA < 2024.7
+            hass.http.register_static_path(CARD_URL, path, False)
+        add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("BGG-Regalkarte konnte nicht registriert werden")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
