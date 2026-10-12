@@ -411,7 +411,7 @@ header small { color: var(--secondary-text-color); font-weight: 400; margin-left
   background: hsl(var(--hue) 45% 46%); color: #fff; font-size: 11px; line-height: 1.1;
   box-shadow: inset 0 -2px 0 rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.2);
   transition: transform .15s, opacity .15s, filter .15s; }
-.box img { height: 80%; aspect-ratio: 1; object-fit: cover; border-radius: 1px; flex: none; }
+.box img { height: 80%; width: auto; max-width: 28px; object-fit: cover; border-radius: 1px; flex: none; }
 .box span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 1px rgba(0,0,0,.4); }
 .box:hover, .box:focus-visible { transform: translateX(4px); filter: brightness(1.12); outline: none; }
 .box.dim { opacity: .18; }
@@ -423,7 +423,7 @@ header small { color: var(--secondary-text-color); font-weight: 400; margin-left
 .floor .stack { flex: 0 1 200px; }
 .empty, .error { color: var(--secondary-text-color); }
 .error { color: var(--error-color, #c00); }
-.overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center;
+.overlay { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(0,0,0,.45); display: flex; align-items: center;
   justify-content: center; z-index: 10; padding: 16px; }
 .dialog { position: relative; width: min(440px, 100%); max-height: 90vh; overflow: auto; border-radius: 12px; padding: 20px;
   background: var(--card-background-color, #fff); color: var(--primary-text-color); box-shadow: 0 8px 32px rgba(0,0,0,.3); }
