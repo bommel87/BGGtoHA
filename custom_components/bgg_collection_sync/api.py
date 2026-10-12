@@ -71,6 +71,10 @@ class CollectionItem:
     version_name: str | None = None
     languages: list[str] = field(default_factory=list)  # falls die Collection sie liefert
     subtype: str = "boardgame"
+    collid: int | None = None  # ID des Sammlungseintrags (zum Ändern/Löschen auf BGG)
+    prev_owned: bool = False
+    for_trade: bool = False
+    status: dict[str, str] = field(default_factory=dict)  # alle BGG-Statusflags
 
 
 @dataclass
@@ -179,10 +183,12 @@ class BggClient:
             # BGG liefert Erweiterungen sonst im Standard-Subtype mit
             params["subtype"] = "boardgame"
             params["excludesubtype"] = EXPANSION
-        if only_owned:
-            params["own"] = 1
         root = await self._get("collection", params)
-        return [self._parse_item(el) for el in root.findall("item")]
+        items = [self._parse_item(el) for el in root.findall("item")]
+        if only_owned:
+            # Lokal filtern statt own=1, damit auch "früher besessen" mitkommt
+            items = [i for i in items if i.owned or i.prev_owned]
+        return items
 
     @staticmethod
     def _parse_item(item: ET.Element) -> CollectionItem:
@@ -224,6 +230,11 @@ class BggClient:
             version_name=version_name,
             languages=languages,
             subtype=item.get("subtype") or "boardgame",
+            collid=_to_int(item.get("collid")),
+            prev_owned=flag("prevowned"),
+            for_trade=flag("fortrade"),
+            status={k: v for k, v in (status.attrib if status is not None else {}).items()
+                    if k != "lastmodified"},
         )
 
     async def fetch_things(self, ids: list[int]) -> ThingData:
