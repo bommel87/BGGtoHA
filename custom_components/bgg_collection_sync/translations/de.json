@@ -34,7 +34,8 @@
           "only_owned": "Nur Spiele im Besitz synchronisieren",
           "include_expansions": "Erweiterungen mitsynchronisieren und verknüpfen",
           "media_player": "Wiedergabegerät für Playlists",
-          "end_scene": "Szene/Skript bei Spielende"
+          "end_scene": "Szene/Skript bei Spielende",
+          "bgg_password": "BGG-Passwort (nur für Statusänderungen auf BGG)"
         }
       }
     }
@@ -253,6 +254,28 @@
     "reset_suggestion": {
       "name": "Vorschlag zurücksetzen",
       "description": "Setzt die Auswahl zurück."
+    },
+    "set_bgg_status": {
+      "name": "BGG-Status ändern",
+      "description": "Ändert den Status des Spiels in deiner BGG-Sammlung (benötigt das BGG-Passwort in den Optionen).",
+      "fields": {
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Config-Entry-ID (nur bei mehreren Konten)."
+        },
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name des Spiels (alternativ zur BGG-ID)."
+        },
+        "status": {
+          "name": "Status",
+          "description": "owned = im Besitz, for_sale = zu verkaufen, prev_owned = früher besessen, delete = aus der Sammlung löschen."
+        }
+      }
     }
   }
 }

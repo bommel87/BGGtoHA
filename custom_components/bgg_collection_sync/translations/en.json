@@ -34,7 +34,8 @@
           "only_owned": "Only sync owned games",
           "include_expansions": "Sync expansions and link them to base games",
           "media_player": "Media player for playlists",
-          "end_scene": "Scene/script at end of play"
+          "end_scene": "Scene/script at end of play",
+          "bgg_password": "BGG password (only for status changes on BGG)"
         }
       }
     }
@@ -253,6 +254,28 @@
     "reset_suggestion": {
       "name": "Reset suggestion",
       "description": "Resets the selection."
+    },
+    "set_bgg_status": {
+      "name": "Change BGG status",
+      "description": "Changes the game's status in your BGG collection (requires the BGG password in the options).",
+      "fields": {
+        "entry_id": {
+          "name": "Entry",
+          "description": "Config entry ID (only with several accounts)."
+        },
+        "bgg_id": {
+          "name": "BGG ID",
+          "description": "BGG ID of the game."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Game name (alternative to the BGG ID)."
+        },
+        "status": {
+          "name": "Status",
+          "description": "owned, for_sale, prev_owned or delete (remove from collection)."
+        }
+      }
     }
   }
 }
