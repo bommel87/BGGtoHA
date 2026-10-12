@@ -309,3 +309,96 @@ class BggClient:
                     )
                 )
         return ThingData(versions=versions, base_links=base_links, info=info)
+
+# ---- Schreiben (inoffizielle Website-Schnittstelle) ----------------------
+# Die XML API kann nur lesen. Status ändern/löschen geht nur wie im Browser:
+# Login mit Benutzername + Passwort, dann geekcollection.php mit Session-Cookie.
+WEB_BASE = "https://boardgamegeek.com"
+STATUS_FLAGS = (
+    "own", "prevowned", "fortrade", "want", "wanttoplay", "wanttobuy", "wishlist", "preordered"
+)
+# Zielstatus -> Flags, die gesetzt werden (alle anderen Flags bleiben wie sie sind)
+STATUS_TARGETS = {
+    "owned": {"own": True, "prevowned": False, "fortrade": False},
+    "for_sale": {"own": True, "prevowned": False, "fortrade": True},
+    "prev_owned": {"own": False, "prevowned": True, "fortrade": False},
+}
+
+
+class BggWebClient:
+    """Ändert die Sammlung über die BGG-Webseite (benötigt das BGG-Passwort)."""
+
+    def __init__(self, session: aiohttp.ClientSession, username: str, password: str) -> None:
+        self._session = session  # eigene Session mit Cookie-Jar
+        self._username = username
+        self._password = password
+        self._logged_in = False
+
+    async def login(self) -> None:
+        try:
+            async with self._session.post(
+                f"{WEB_BASE}/login/api/v1",
+                json={"credentials": {"username": self._username, "password": self._password}},
+                headers={"User-Agent": USER_AGENT},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status in (400, 401, 403):
+                    raise BggAuthError("BGG-Login fehlgeschlagen (Benutzername/Passwort prüfen)")
+                if resp.status >= 300:
+                    raise BggError(f"BGG-Login: HTTP {resp.status}")
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise BggError(f"Verbindung zu BGG fehlgeschlagen: {err}") from err
+        self._logged_in = True
+
+    async def _post(self, data: dict[str, str]) -> None:
+        for attempt in range(2):
+            if not self._logged_in:
+                await self.login()
+            try:
+                async with self._session.post(
+                    f"{WEB_BASE}/geekcollection.php",
+                    data=data,
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    text = await resp.text()
+                    status = resp.status
+            except (aiohttp.ClientError, TimeoutError) as err:
+                raise BggError(f"Verbindung zu BGG fehlgeschlagen: {err}") from err
+            needs_login = status in (401, 403) or "must login" in text.lower() or (
+                "login" in text.lower() and "error" in text.lower() and len(text) < 500
+            )
+            if needs_login and attempt == 0:
+                self._logged_in = False  # Session abgelaufen -> einmal neu anmelden
+                continue
+            if needs_login:
+                raise BggAuthError("BGG hat die Änderung abgelehnt (nicht angemeldet)")
+            if status != 200:
+                raise BggError(f"BGG antwortete mit HTTP {status}")
+            return
+
+    async def set_status(
+        self, collid: int, bgg_id: int, current: dict[str, str], target: str
+    ) -> dict[str, str]:
+        """Setzt den Status; liefert die neuen Flags zurück."""
+        flags = {k: current.get(k) == "1" for k in STATUS_FLAGS}
+        flags.update(STATUS_TARGETS[target])
+        data = {
+            "ajax": "1",
+            "action": "savedata",
+            "collid": str(collid),
+            "objecttype": "thing",
+            "objectid": str(bgg_id),
+            "fieldname": "status",
+        }
+        data.update({k: "1" for k, on in flags.items() if on})
+        if flags["wishlist"]:
+            data["wishlistpriority"] = current.get("wishlistpriority") or "3"
+        await self._post(data)
+        new = {k: "1" if on else "0" for k, on in flags.items()}
+        if "wishlistpriority" in current:
+            new["wishlistpriority"] = current["wishlistpriority"]
+        return new
+
+    async def delete(self, collid: int) -> None:
+        await self._post({"ajax": "1", "action": "delete", "collid": str(collid)})
