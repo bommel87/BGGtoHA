@@ -1,13 +1,15 @@
 """BGG Collection Sync: BoardGameGeek-Sammlung, Standorte, Partien und Spielvorschläge."""
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -33,7 +35,6 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 CARD_URL = "/bgg_collection_sync/bgg-shelf-card.js"
-CARD_VERSION = "0.5.0"
 
 type BggConfigEntry = ConfigEntry[BggCoordinator]
 
@@ -124,16 +125,67 @@ async def _async_register_card(hass: HomeAssistant) -> None:
     try:
         from homeassistant.components.frontend import add_extra_js_url
 
-        path = str(Path(__file__).parent / "frontend" / "bgg-shelf-card.js")
+        path = Path(__file__).parent / "frontend" / "bgg-shelf-card.js"
         try:
             from homeassistant.components.http import StaticPathConfig
 
-            await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, path, False)])
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(CARD_URL, str(path), False)]
+            )
         except ImportError:  # HA < 2024.7
-            hass.http.register_static_path(CARD_URL, path, False)
-        add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+            hass.http.register_static_path(CARD_URL, str(path), False)
+        # Version aus dem Dateiinhalt -> nach jedem Update neue URL, kein alter Cache
+        digest = await hass.async_add_executor_job(
+            lambda: hashlib.sha1(path.read_bytes()).hexdigest()[:10]
+        )
+        url = f"{CARD_URL}?v={digest}"
+        add_extra_js_url(hass, url)
     except Exception:  # noqa: BLE001
         _LOGGER.exception("BGG-Regalkarte konnte nicht registriert werden")
+        return
+
+    # Zusätzlich als Dashboard-Ressource eintragen: die Companion-App hält die
+    # Startseite (und damit extra_js_url) im Cache, Ressourcen lädt sie immer frisch.
+    async def _add_resource(_event: Event | None = None) -> None:
+        try:
+            await _async_ensure_resource(hass, url)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning(
+                "Regalkarte konnte nicht als Dashboard-Ressource eingetragen werden. "
+                "Manuell hinzufügen: %s (JavaScript-Modul)", url, exc_info=True
+            )
+
+    if hass.state is CoreState.running:
+        await _add_resource()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _add_resource)
+
+
+async def _async_ensure_resource(hass: HomeAssistant, url: str) -> None:
+    """Legt die Karte in den Lovelace-Ressourcen an bzw. aktualisiert die Version."""
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        return
+    resources = getattr(lovelace, "resources", None)
+    if resources is None and isinstance(lovelace, dict):
+        resources = lovelace.get("resources")
+    if resources is None or not hasattr(resources, "async_create_item"):
+        # Dashboards im YAML-Modus: Ressourcen werden in der configuration.yaml gepflegt
+        _LOGGER.info("Lovelace im YAML-Modus – Ressource bitte manuell eintragen: %s", url)
+        return
+    if not getattr(resources, "loaded", True):
+        await resources.async_load()
+        resources.loaded = True
+
+    mine = [r for r in resources.async_items() if r["url"].split("?")[0] == CARD_URL]
+    if not mine:
+        await resources.async_create_item({"res_type": "module", "url": url})
+        return
+    first, *dupes = mine
+    if first["url"] != url:
+        await resources.async_update_item(first["id"], {"res_type": "module", "url": url})
+    for dupe in dupes:
+        await resources.async_delete_item(dupe["id"])
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
