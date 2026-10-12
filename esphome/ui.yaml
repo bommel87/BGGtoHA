@@ -1,11 +1,20 @@
 # UI-Logik: Auswahl -> Vorschlag -> Ablehnen/Zusagen -> Standort + Start -> Partie läuft.
 # Der Zustand (Phase, Name, Standort ...) kommt aus Home Assistant, das Display ist zustandslos.
+#
+# Layout für das runde 466x466-Display: Mittelpunkt (233, 233), Radius 233.
+# Alle Elemente sind von der Mitte aus positioniert (align: CENTER + x/y) und so
+# bemessen, dass ihre Ecken innerhalb des Kreises liegen. Schwarzer Hintergrund,
+# weil schwarze Pixel auf AMOLED aus sind.
 
 font:
   - file: "gfonts://Roboto"
     id: roboto_28
     size: 28
-    glyphs: "!\"#%&'()+,-./0123456789:?ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyzäöüÄÖÜß|"
+    glyphs: &glyphs "!\"#%&'()+,-./0123456789:?ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyzäöüÄÖÜß|"
+  - file: "gfonts://Roboto"
+    id: roboto_20
+    size: 20
+    glyphs: *glyphs
 
 text_sensor:
   # --- Vorschlag ---
@@ -101,64 +110,77 @@ lvgl:
     - main_display
   touchscreens:
     - main_touch
+  bg_color: 0x000000
+  text_color: 0xFFFFFF
+  style_definitions:
+    - id: pill
+      radius: 30
+    - id: muted
+      text_font: roboto_20
+      text_color: 0xA0A0A0
+  theme:
+    roller:
+      bg_color: 0x1E1E1E
+      text_color: 0xFFFFFF
+      border_width: 0
+      text_font: roboto_20
   pages:
     # ------------------------------------------------------------ Auswahl
     - id: page_select
+      bg_color: 0x000000
       widgets:
         - label:
             text: "Was spielen wir?"
-            align: TOP_MID
-            y: 14
+            align: CENTER
+            y: -170
         - label:
             text: "Modus"
-            align: TOP_LEFT
-            x: 6
-            y: 64
-            text_font: montserrat_16
+            styles: muted
+            align: CENTER
+            x: -136
+            y: -62
         - label:
             text: "Typ"
-            align: TOP_MID
-            y: 64
-            text_font: montserrat_16
+            styles: muted
+            align: CENTER
+            y: -62
         - label:
             text: "Spieler"
-            align: TOP_RIGHT
-            x: -6
-            y: 64
-            text_font: montserrat_16
+            styles: muted
+            align: CENTER
+            x: 136
+            y: -62
         - roller:
             id: roller_mode
             options: ["Egal", "Koop", "Wettkampf"]
             visible_row_count: 3
-            width: 31%
-            align: TOP_LEFT
-            x: 4
-            y: 92
-            text_font: montserrat_18
+            width: 130
+            align: CENTER
+            x: -136
+            y: 20
         - roller:
             id: roller_type
             options: ["Egal", "Familie", "Strategie", "Party", "Abstrakt", "Thematisch", "Wargame", "Kinder"]
             visible_row_count: 3
-            width: 31%
-            align: TOP_MID
-            y: 92
-            text_font: montserrat_18
+            width: 130
+            align: CENTER
+            y: 20
         - roller:
             id: roller_players
             options: ["1", "2", "3", "4", "5", "6", "7", "8"]
             selected_index: 3
             visible_row_count: 3
-            width: 31%
-            align: TOP_RIGHT
-            x: -4
-            y: 92
-            text_font: montserrat_18
+            width: 130
+            align: CENTER
+            x: 136
+            y: 20
         - button:
             id: btn_suggest
-            width: 85%
-            height: 64
-            align: BOTTOM_MID
-            y: -16
+            styles: pill
+            width: 240
+            height: 60
+            align: CENTER
+            y: 130
             widgets:
               - label:
                   text: "Vorschlag"
@@ -171,48 +193,51 @@ lvgl:
                     game_type: "{{ gtype }}"
                     players: "{{ players }}"
                   variables:
-                    mode: |-
+                    mode: !lambda |-
                       static const char *v[] = {"any", "cooperative", "competitive"};
                       return std::string(v[lv_roller_get_selected(id(roller_mode))]);
-                    gtype: |-
+                    gtype: !lambda |-
                       static const char *v[] = {"any", "family", "strategy", "party",
                                                 "abstract", "thematic", "wargame", "children"};
                       return std::string(v[lv_roller_get_selected(id(roller_type))]);
-                    players: |-
+                    players: !lambda |-
                       return std::to_string(lv_roller_get_selected(id(roller_players)) + 1);
 
     # ------------------------------------------------------------ Vorschlag
     - id: page_suggest
+      bg_color: 0x000000
       widgets:
         - label:
-            text: "Wie waere es mit"
-            align: TOP_MID
-            y: 20
-            text_font: montserrat_18
+            text: "Wie wäre es mit"
+            styles: muted
+            align: CENTER
+            y: -150
         - label:
             id: lbl_sug_name
             text: "-"
-            width: 92%
+            width: 330
             long_mode: WRAP
             text_align: CENTER
             align: CENTER
-            y: -40
+            y: -60
         - label:
             id: lbl_sug_summary
             text: ""
-            width: 92%
+            styles: muted
+            width: 330
             long_mode: WRAP
             text_align: CENTER
             align: CENTER
-            y: 50
-            text_font: montserrat_18
+            y: 40
         - button:
             id: btn_reject
-            width: 42%
-            height: 64
-            align: BOTTOM_LEFT
-            x: 12
-            y: -16
+            styles: pill
+            bg_color: 0x444444
+            width: 150
+            height: 60
+            align: CENTER
+            x: -82
+            y: 130
             widgets:
               - label:
                   text: "Nein"
@@ -222,11 +247,13 @@ lvgl:
                   action: bgg_collection_sync.reject_suggestion
         - button:
             id: btn_accept
-            width: 42%
-            height: 64
-            align: BOTTOM_RIGHT
-            x: -12
-            y: -16
+            styles: pill
+            bg_color: 0x2E7D32
+            width: 150
+            height: 60
+            align: CENTER
+            x: 82
+            y: 130
             widgets:
               - label:
                   text: "Ja"
@@ -237,50 +264,54 @@ lvgl:
 
     # ------------------------------------------------------------ Zugesagt
     - id: page_accepted
+      bg_color: 0x000000
       widgets:
         - label:
             id: lbl_acc_name
             text: "-"
-            width: 92%
+            width: 300
             long_mode: WRAP
             text_align: CENTER
-            align: TOP_MID
-            y: 20
+            align: CENTER
+            y: -120
         - label:
             text: "Standort"
+            styles: muted
             align: CENTER
-            y: -50
-            text_font: montserrat_18
+            y: -40
         - label:
             id: lbl_acc_location
             text: ""
-            width: 92%
+            width: 330
             long_mode: WRAP
             text_align: CENTER
             align: CENTER
             y: 10
         - button:
             id: btn_back
-            width: 30%
-            height: 64
-            align: BOTTOM_LEFT
-            x: 12
-            y: -16
+            styles: pill
+            bg_color: 0x444444
+            width: 150
+            height: 60
+            align: CENTER
+            x: -82
+            y: 130
             widgets:
               - label:
-                  text: "Zurueck"
+                  text: "Zurück"
                   align: CENTER
-                  text_font: montserrat_18
             on_click:
               - homeassistant.action:
                   action: bgg_collection_sync.reset_suggestion
         - button:
             id: btn_start
-            width: 58%
-            height: 64
-            align: BOTTOM_RIGHT
-            x: -12
-            y: -16
+            styles: pill
+            bg_color: 0x2E7D32
+            width: 150
+            height: 60
+            align: CENTER
+            x: 82
+            y: 130
             widgets:
               - label:
                   text: "Start"
@@ -291,21 +322,24 @@ lvgl:
 
     # ------------------------------------------------------------ Kein Treffer
     - id: page_none
+      bg_color: 0x000000
       widgets:
         - label:
             text: "Keine (weiteren) Spiele gefunden"
-            width: 92%
+            width: 320
             long_mode: WRAP
             text_align: CENTER
             align: CENTER
+            y: -30
         - button:
-            width: 85%
-            height: 64
-            align: BOTTOM_MID
-            y: -16
+            styles: pill
+            width: 240
+            height: 60
+            align: CENTER
+            y: 130
             widgets:
               - label:
-                  text: "Neu waehlen"
+                  text: "Neu wählen"
                   align: CENTER
             on_click:
               - homeassistant.action:
@@ -313,24 +347,28 @@ lvgl:
 
     # ------------------------------------------------------------ Läuft
     - id: page_running
+      bg_color: 0x000000
       widgets:
         - label:
-            text: "Partie laeuft"
-            align: TOP_MID
-            y: 20
-            text_font: montserrat_18
+            text: "Partie läuft"
+            styles: muted
+            align: CENTER
+            y: -130
         - label:
             id: lbl_run_name
             text: "-"
-            width: 92%
+            width: 330
             long_mode: WRAP
             text_align: CENTER
             align: CENTER
+            y: -20
         - button:
-            width: 85%
-            height: 64
-            align: BOTTOM_MID
-            y: -16
+            styles: pill
+            bg_color: 0xC62828
+            width: 240
+            height: 60
+            align: CENTER
+            y: 130
             widgets:
               - label:
                   text: "Beenden"

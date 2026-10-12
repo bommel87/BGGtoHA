@@ -1,22 +1,87 @@
-# PLATZHALTER - Display, Touch und Pins hängen vom exakten Waveshare-Modell ab
-# (z. B. ESP32-S3-Touch-AMOLED-1.8 / 1.64 / 2.06 haben unterschiedliche Treiber und Pins).
+# Hardware: Waveshare ESP32-S3-Touch-AMOLED-1.75 (Standard / -G, NICHT die 1.75C)
+#   Display: 1,75" rund, 466x466, Treiber CO5300 über QSPI
+#   Touch:   CST9217 über I2C (0x5A) - externe Komponente, benötigt esp-idf
+#   PMIC:    AXP2101 (0x34), versorgt das Panel über BLDO1
+# Pins aus dem offiziellen Waveshare-Repo (pin_config.h), gegengeprüft mit
+# github.com/socquique/TamaPoke und devices.esphome.io.
 #
-# Diese Datei muss zwei Dinge bereitstellen, die ui.yaml verwendet:
-#   - eine Anzeige mit   id: main_display
-#   - einen Touchscreen mit   id: main_touch
-#
-# Skizze (NICHT lauffähig, bitte an das Modell anpassen; Pins/Treiber im Waveshare-Wiki
-# bzw. ESPHome-Doku zu "display" und "touchscreen" nachschlagen):
-#
-# spi:            # QSPI-Bus des AMOLED
-#   ...
-# i2c:            # Touch-Controller (+ ggf. IO-Expander/PMIC)
-#   ...
-# display:
-#   - platform: ...
-#     id: main_display
-#     ...
-# touchscreen:
-#   - platform: ...
-#     id: main_touch
-#     ...
+# Stellt bereit, was ui.yaml erwartet:  main_display, main_touch
+
+external_components:
+  - source: github://shelson/esphome-cst9217
+    components: [cst9217]
+
+esphome:
+  on_boot:
+    # Nach dem I2C-Bus (1000), vor dem Display: Panel-Versorgung BLDO1 = 3,3 V
+    # einschalten. Nach einem kompletten Akku-Leerlauf setzt der AXP2101 zurück,
+    # BLDO1 bleibt aus und das Display bleibt schwarz.
+    priority: 900
+    then:
+      - lambda: |-
+          auto *bus = id(i2c_bus);
+          const uint8_t AXP = 0x34;
+          uint8_t vol[2] = {0x96, 28};      // BLDO1-Spannung: 0,5 V + 28 * 0,1 V = 3,3 V
+          bus->write(AXP, vol, 2);
+          uint8_t reg = 0x90, en = 0;       // LDO-Enable-Register, Bit 4 = BLDO1
+          if (bus->write(AXP, &reg, 1, false) == i2c::ERROR_OK && bus->read(AXP, &en, 1) == i2c::ERROR_OK) {
+            uint8_t on[2] = {0x90, (uint8_t) (en | 0x10)};
+            bus->write(AXP, on, 2);
+          } else {
+            ESP_LOGW("hw", "AXP2101 nicht erreichbar");
+          }
+
+i2c:
+  id: i2c_bus
+  sda: GPIO15
+  scl: GPIO14
+  scan: true
+
+spi:
+  id: qspi_bus
+  type: quad
+  clk_pin: GPIO38
+  data_pins: [GPIO4, GPIO5, GPIO6, GPIO7]
+
+display:
+  - platform: mipi_spi
+    id: main_display
+    spi_id: qspi_bus
+    model: CO5300
+    bus_mode: quad
+    cs_pin: GPIO12
+    reset_pin: GPIO39
+    data_rate: 40MHz        # 80MHz geht laut TamaPoke auch; bei Bildfehlern hier bleiben
+    dimensions:
+      width: 466
+      height: 466
+      offset_width: 6       # CO5300 ist 480 breit, das Panel sitzt um 6 Spalten versetzt
+      offset_height: 0
+    brightness: 0xD0
+    auto_clear_enabled: false
+    update_interval: never  # LVGL zeichnet selbst
+
+touchscreen:
+  - platform: cst9217
+    id: main_touch
+    display: main_display
+    interrupt_pin: GPIO11
+    reset_pin: GPIO40
+    transform:              # Panel ist um 180° gedreht eingebaut
+      mirror_x: true
+      mirror_y: true
+
+# Helligkeit aus Home Assistant regelbar (AMOLED: über Display-Befehl, kein PWM)
+output:
+  - platform: template
+    id: display_brightness_out
+    type: float
+    write_action:
+      - lambda: 'id(main_display).set_brightness((uint8_t) (state * 255));'
+
+light:
+  - platform: monochromatic
+    name: Display
+    output: display_brightness_out
+    default_transition_length: 250ms
+    restore_mode: ALWAYS_ON
