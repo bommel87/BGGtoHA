@@ -65,8 +65,11 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _summarize(self, local: tuple[Any, ...], last_sync: datetime) -> dict[str, Any]:
         everything, active, play_count, last_play = local
-        games = [g for g in everything if g["subtype"] != EXPANSION]
-        expansions = [g for g in everything if g["subtype"] == EXPANSION]
+        # "Früher besessen" separat halten: zählt nicht zur Sammlung, kein Vorschlag
+        prev_owned = [g for g in everything if g["prev_owned"] and not g["owned"]]
+        current = [g for g in everything if not (g["prev_owned"] and not g["owned"])]
+        games = [g for g in current if g["subtype"] != EXPANSION]
+        expansions = [g for g in current if g["subtype"] == EXPANSION]
 
         if active:
             game = next((g for g in everything if g["bgg_id"] == active["bgg_id"]), None)
@@ -83,6 +86,7 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "languages": dict(languages.most_common()),
             "games": games,
             "expansions": expansions,
+            "prev_owned": prev_owned,
             "active_play": active,
             "play_count": play_count,
             "last_play": last_play,
@@ -165,6 +169,10 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "version_name": it.version_name,
                         "version_language": SEP.join(langs) or None,
                         "last_modified": it.last_modified,
+                        "collid": it.collid,
+                        "prev_owned": int(it.prev_owned),
+                        "for_trade": int(it.for_trade),
+                        "status": it.status,
                     }
                 )
             await run(self.db.replace_games, self.client.username, rows, synced_at.isoformat())

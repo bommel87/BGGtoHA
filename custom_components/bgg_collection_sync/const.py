@@ -18,3 +18,5 @@ SERVICE_SYNC_NOW = "sync_now"
 SERVICE_GET_GAMES = "get_games"
 CONF_MEDIA_PLAYER = "media_player"
 CONF_END_SCENE = "end_scene"
+CONF_PASSWORD = "bgg_password"  # nur für Änderungen auf BGG (Status/Löschen)
+BGG_STATUSES = ["owned", "for_sale", "prev_owned", "delete"]
