@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import BggClient
 from .const import (
+    BGG_STATUSES,
     CONF_TOKEN,
     CONF_USERNAME,
     DB_FILENAME,
@@ -44,6 +45,7 @@ GET_GAMES_SCHEMA = vol.Schema(
     {
         vol.Optional("language"): cv.string,
         vol.Optional("type", default="all"): vol.In(["all", "games", "expansions"]),
+        vol.Optional("include_prev_owned", default=False): cv.boolean,
         **_ENTRY,
     }
 )
@@ -92,6 +94,7 @@ SUGGEST_SCHEMA = vol.Schema(
 )
 ENTRY_ONLY_SCHEMA = vol.Schema(_ENTRY)
 ASSIGN_TAG_SCHEMA = vol.Schema(_GAME)
+SET_STATUS_SCHEMA = vol.Schema({**_GAME, vol.Required("status"): vol.In(BGG_STATUSES)})
 
 
 def _loaded_entries(hass: HomeAssistant, entry_id: str | None = None) -> list[BggConfigEntry]:
@@ -151,6 +154,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 pool += [("game", g) for g in data["games"]]
             if kind in ("all", "expansions"):
                 pool += [("expansion", g) for g in data["expansions"]]
+            if call.data["include_prev_owned"]:
+                pool += [
+                    ("expansion" if g["subtype"] == "boardgameexpansion" else "game", g)
+                    for g in data.get("prev_owned", [])
+                    if kind == "all"
+                    or (kind == "expansions") == (g["subtype"] == "boardgameexpansion")
+                ]
             for item_type, game in pool:
                 if wanted and wanted not in (lang.lower() for lang in game["languages"]):
                     continue
@@ -171,6 +181,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         "nfc_tag": game["nfc_tag"],
                         "spotify_uri": game["spotify_uri"],
                         "light_scene": game["light_scene"],
+                        "owned": game["owned"],
+                        "for_trade": game["for_trade"],
+                        "prev_owned": game["prev_owned"],
                         "min_players": game["min_players"],
                         "max_players": game["max_players"],
                         "playing_time": game["playing_time"],
@@ -253,6 +266,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle_reset(call: ServiceCall) -> None:
         _coordinator(hass, call).manager.reset()
 
+    async def handle_set_status(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        return await c.manager.async_set_bgg_status(_game(c, call), call.data["status"])
+
     reg = hass.services.async_register
     reg(DOMAIN, SERVICE_SYNC_NOW, handle_sync_now)
     reg(DOMAIN, SERVICE_GET_GAMES, handle_get_games, schema=GET_GAMES_SCHEMA,
@@ -274,6 +291,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     reg(DOMAIN, "reject_suggestion", handle_reject, schema=ENTRY_ONLY_SCHEMA)
     reg(DOMAIN, "accept_suggestion", handle_accept, schema=ENTRY_ONLY_SCHEMA)
     reg(DOMAIN, "reset_suggestion", handle_reset, schema=ENTRY_ONLY_SCHEMA)
+    reg(DOMAIN, "set_bgg_status", handle_set_status, schema=SET_STATUS_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
     return True
 
 
