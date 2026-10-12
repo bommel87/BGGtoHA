@@ -29,7 +29,7 @@ const STATUSES = [
 const statusOf = (g) => (g.prev_owned && !g.owned ? "prev_owned" : g.for_trade ? "for_sale" : "owned");
 
 const esc = (s) =>
-  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 const hash = (s) => {
   let h = 2166136261;
@@ -40,7 +40,7 @@ const hash = (s) => {
 const naturalSort = (a, b) => a.localeCompare(b, "de", { numeric: true, sensitivity: "base" });
 
 function parseLocation(raw) {
-  const loc = String(raw ?? "").trim();
+  const loc = String(raw == null ? "" : raw).trim();
   if (!loc) return { shelf: NO_LOCATION, fach: null };
   const m = loc.match(/(?:fach|boden|ebene)\s*(\d+)/i);
   const fach = m ? parseInt(m[1], 10) : null;
@@ -85,7 +85,7 @@ class BggShelfCard extends HTMLElement {
     this._hass = hass;
     // Neu laden, sobald sich der Sammlungs-Sensor ändert (Sync, neuer Standort …)
     const sensor = Object.values(hass.states).find(
-      (s) => s.entity_id.startsWith("sensor.") && Array.isArray(s.attributes?.games) && "languages" in s.attributes
+      (s) => s.entity_id.startsWith("sensor.") && s.attributes && Array.isArray(s.attributes.games) && "languages" in s.attributes
     );
     const stamp = sensor ? sensor.last_updated : "none";
     if (stamp !== this._stamp) {
@@ -111,7 +111,7 @@ class BggShelfCard extends HTMLElement {
       this._games = games;
       this._error = null;
     } catch (err) {
-      this._error = err?.message || String(err);
+      this._error = (err && err.message) || String(err);
     } finally {
       this._loading = false;
       this._render();
@@ -254,7 +254,7 @@ class BggShelfCard extends HTMLElement {
         <div class="loc">
           <input list="bgg-shelves" id="shelf" placeholder="Regal" value="${shelf === NO_LOCATION ? "" : esc(shelf)}">
           <datalist id="bgg-shelves">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
-          <label>Fach <input id="fach" type="number" min="1" max="20" value="${fach ?? ""}"></label>
+          <label>Fach <input id="fach" type="number" min="1" max="20" value="${fach == null ? "" : fach}"></label>
         </div>
         <div class="actions">
           <button id="save">Standort speichern</button>
@@ -289,7 +289,7 @@ class BggShelfCard extends HTMLElement {
       this._msg = target === "delete" ? "Von BGG gelöscht" : `Auf BGG gespeichert: ${label}`;
       if (target === "delete") this._selected = null;
     } catch (err) {
-      this._msg = err?.message || String(err);
+      this._msg = (err && err.message) || String(err);
     }
     this._busy = false;
     this._render();
@@ -300,7 +300,7 @@ class BggShelfCard extends HTMLElement {
       await this._hass.callService(DOMAIN, service, data);
       this._msg = okMsg;
     } catch (err) {
-      this._msg = err?.message || String(err);
+      this._msg = (err && err.message) || String(err);
     }
     const msg = this.shadowRoot.getElementById("msg");
     if (msg) msg.textContent = this._msg;
@@ -332,7 +332,8 @@ class BggShelfCard extends HTMLElement {
            ${area("Zu verkaufen", forSale, "sale-area")}
            ${area("Früher besessen", prevOwned, "gone-area")}`;
 
-    const focused = this.shadowRoot.activeElement?.id === "search";
+    const active = this.shadowRoot.activeElement;
+    const focused = !!active && active.id === "search";
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
       <ha-card>
         <div class="top">
@@ -373,8 +374,10 @@ class BggShelfCard extends HTMLElement {
     root.querySelectorAll(".st").forEach((b) =>
       b.addEventListener("click", () => this._setStatus(b.dataset.status))
     );
-    root.getElementById("save")?.addEventListener("click", () => this._save());
-    root.getElementById("play")?.addEventListener("click", () =>
+    const save = root.getElementById("save");
+    if (save) save.addEventListener("click", () => this._save());
+    const play = root.getElementById("play");
+    if (play) play.addEventListener("click", () =>
       this._call("start_play", { bgg_id: this._selected }, "Partie gestartet")
     );
   }
