@@ -14,9 +14,19 @@
  *   stack_size: 5                 # Schachteln pro Stapel
  *   shelves: [Regal 1, Regal 2]   # optional: Reihenfolge / leere Regale anzeigen
  *   show_expansions: false        # Erweiterungen mit eigenem Standort mit einsortieren
+ *
+ * Status (Klick auf ein Spiel): Im Besitz / Zu verkaufen / Früher besessen / Löschen
+ * -> Dienst set_bgg_status, schreibt zu BGG zurück (BGG-Passwort in den Optionen nötig).
  */
 const DOMAIN = "bgg_collection_sync";
 const NO_LOCATION = "\u0000none";
+const STATUSES = [
+  ["owned", "Im Besitz"],
+  ["for_sale", "Zu verkaufen"],
+  ["prev_owned", "Früher besessen"],
+  ["delete", "Löschen"],
+];
+const statusOf = (g) => (g.prev_owned && !g.owned ? "prev_owned" : g.for_trade ? "for_sale" : "owned");
 
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -92,7 +102,7 @@ class BggShelfCard extends HTMLElement {
         type: "call_service",
         domain: DOMAIN,
         service: "get_games",
-        service_data: { type: this._config.show_expansions ? "all" : "games" },
+        service_data: { type: this._config.show_expansions ? "all" : "games", include_prev_owned: true },
         return_response: true,
       });
       let games = res.response.games;
@@ -116,7 +126,15 @@ class BggShelfCard extends HTMLElement {
     };
     (this._config.shelves || []).forEach((n) => ensure(String(n)));
     const unplaced = [];
+    const forSale = [];
+    const prevOwned = [];
     for (const g of this._games) {
+      const status = statusOf(g);
+      if (status === "prev_owned") {
+        prevOwned.push(g); // nicht mehr im Regal
+        continue;
+      }
+      if (status === "for_sale") forSale.push(g); // bleibt im Regal, zusätzlich im Verkaufsbereich
       const { shelf, fach } = parseLocation(g.location);
       if (shelf === NO_LOCATION) {
         unplaced.push(g);
@@ -142,7 +160,9 @@ class BggShelfCard extends HTMLElement {
       s.loose.sort(byName);
     });
     unplaced.sort(byName);
-    return { shelves: list, unplaced };
+    forSale.sort(byName);
+    prevOwned.sort(byName);
+    return { shelves: list, unplaced, forSale, prevOwned };
   }
 
   _matches(g) {
@@ -157,8 +177,11 @@ class BggShelfCard extends HTMLElement {
     const width = 82 + ((h >> 4) % 4) * 5;
     const dim = this._query && !this._matches(g) ? " dim" : this._query ? " hit" : "";
     const thumb = g.thumbnail ? `<img src="${esc(g.thumbnail)}" alt="" loading="lazy">` : "";
-    return `<button class="box${dim}" data-id="${g.bgg_id}" title="${esc(g.name)}"
-      style="--hue:${hue};height:${thick}px;width:${width}%">${thumb}<span>${esc(g.name)}</span></button>`;
+    const status = statusOf(g);
+    const cls = status === "for_sale" ? " sale" : status === "prev_owned" ? " gone" : "";
+    const tag = status === "for_sale" ? `<i class="tag" aria-label="zu verkaufen">€</i>` : "";
+    return `<button class="box${dim}${cls}" data-id="${g.bgg_id}" title="${esc(g.name)}"
+      style="--hue:${hue};height:${thick}px;width:${width}%">${thumb}<span>${esc(g.name)}</span>${tag}</button>`;
   }
 
   _stacks(games) {
@@ -208,6 +231,15 @@ class BggShelfCard extends HTMLElement {
       g.user_rating && `★ ${g.user_rating}`,
     ].filter(Boolean);
     const exp = (g.expansions || []).map((e) => `<li>${esc(e.name)}</li>`).join("");
+    const current = statusOf(g);
+    const statusButtons = STATUSES.map(([key, label]) => {
+      if (key === "delete" && this._confirmDelete)
+        return `<button class="st danger confirm" data-status="delete">Wirklich von BGG löschen?</button>`;
+      const on = key === current ? " on" : "";
+      const danger = key === "delete" ? " danger" : "";
+      return `<button class="st${on}${danger}" data-status="${key}" aria-pressed="${key === current}"
+        ${this._busy ? "disabled" : ""}>${label}</button>`;
+    }).join("");
     return `<div class="overlay" data-close>
       <div class="dialog" role="dialog" aria-label="${esc(g.name)}">
         <button class="x" data-close aria-label="Schließen">×</button>
@@ -216,6 +248,8 @@ class BggShelfCard extends HTMLElement {
           <div><h2>${esc(g.name)}</h2><p>${facts.join(" · ")}</p></div>
         </div>
         ${exp ? `<h3>Erweiterungen</h3><ul>${exp}</ul>` : ""}
+        <h3>Status bei BGG</h3>
+        <div class="status">${statusButtons}</div>
         <h3>Standort</h3>
         <div class="loc">
           <input list="bgg-shelves" id="shelf" placeholder="Regal" value="${shelf === NO_LOCATION ? "" : esc(shelf)}">
@@ -224,7 +258,7 @@ class BggShelfCard extends HTMLElement {
         </div>
         <div class="actions">
           <button id="save">Standort speichern</button>
-          <button id="play" class="primary">Partie starten</button>
+          ${current === "prev_owned" ? "" : `<button id="play" class="primary">Partie starten</button>`}
         </div>
         <p class="msg" id="msg">${esc(this._msg || "")}</p>
       </div>
@@ -237,6 +271,28 @@ class BggShelfCard extends HTMLElement {
     const fach = root.getElementById("fach").value.trim();
     const location = shelf ? (fach ? `${shelf}, Fach ${fach}` : shelf) : fach ? `Regal, Fach ${fach}` : "";
     await this._call("set_game_meta", { bgg_id: this._selected, location }, "Gespeichert");
+  }
+
+  async _setStatus(target) {
+    if (target === "delete" && !this._confirmDelete) {
+      this._confirmDelete = true;
+      this._render();
+      return;
+    }
+    this._confirmDelete = false;
+    this._busy = true;
+    this._msg = "Wird zu BGG übertragen …";
+    this._render();
+    const label = STATUSES.find(([k]) => k === target)[1];
+    try {
+      await this._hass.callService(DOMAIN, "set_bgg_status", { bgg_id: this._selected, status: target });
+      this._msg = target === "delete" ? "Von BGG gelöscht" : `Auf BGG gespeichert: ${label}`;
+      if (target === "delete") this._selected = null;
+    } catch (err) {
+      this._msg = err?.message || String(err);
+    }
+    this._busy = false;
+    this._render();
   }
 
   async _call(service, data, okMsg) {
@@ -252,7 +308,14 @@ class BggShelfCard extends HTMLElement {
 
   _render() {
     if (!this._config) return;
-    const { shelves, unplaced } = this._games.length ? this._layout() : { shelves: [], unplaced: [] };
+    const { shelves, unplaced, forSale, prevOwned } = this._games.length
+      ? this._layout()
+      : { shelves: [], unplaced: [], forSale: [], prevOwned: [] };
+    const area = (title, list, cls) =>
+      list.length
+        ? `<section class="pile ${cls}"><header>${title} <small>${list.length}</small></header>
+             <div class="fach floor">${this._stacks(list)}</div></section>`
+        : "";
     const hits = this._query ? this._games.filter((g) => this._matches(g)) : [];
     const hitInfo = this._query
       ? hits.length
@@ -265,8 +328,9 @@ class BggShelfCard extends HTMLElement {
       : !this._games.length
         ? `<p class="empty">${this._loading ? "Lade Sammlung …" : "Keine Spiele gefunden."}</p>`
         : `<div class="room">${shelves.map((s) => this._billy(s)).join("")}</div>
-           ${unplaced.length ? `<section class="pile"><header>Ohne Standort <small>${unplaced.length}</small></header>
-             <div class="fach floor">${this._stacks(unplaced)}</div></section>` : ""}`;
+           ${area("Ohne Standort", unplaced, "")}
+           ${area("Zu verkaufen", forSale, "sale-area")}
+           ${area("Früher besessen", prevOwned, "gone-area")}`;
 
     const focused = this.shadowRoot.activeElement?.id === "search";
     this.shadowRoot.innerHTML = `<style>${STYLE}</style>
@@ -294,6 +358,7 @@ class BggShelfCard extends HTMLElement {
       b.addEventListener("click", () => {
         this._selected = Number(b.dataset.id);
         this._msg = "";
+        this._confirmDelete = false;
         this._render();
       })
     );
@@ -301,8 +366,12 @@ class BggShelfCard extends HTMLElement {
       el.addEventListener("click", (e) => {
         if (e.target !== el) return;
         this._selected = null;
+        this._confirmDelete = false;
         this._render();
       })
+    );
+    root.querySelectorAll(".st").forEach((b) =>
+      b.addEventListener("click", () => this._setStatus(b.dataset.status))
     );
     root.getElementById("save")?.addEventListener("click", () => this._save());
     root.getElementById("play")?.addEventListener("click", () =>
@@ -371,6 +440,21 @@ ul { margin: 0; padding-left: 18px; font-size: .9em; }
 .actions button { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 8px;
   border: 1px solid var(--primary-color, #03a9f4); color: var(--primary-color, #03a9f4); }
 .actions .primary { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
+.box { position: relative; }
+.box .tag { font-style: normal; font-size: 10px; font-weight: 700; flex: none; margin-left: auto;
+  background: #ffd54f; color: #4a3b00; border-radius: 3px; padding: 1px 4px; text-shadow: none; }
+.box.gone { filter: grayscale(.85); opacity: .75; }
+.sale-area header::before { content: "€ "; color: #b8860b; }
+.gone-area .floor { opacity: .9; }
+.status { display: flex; flex-wrap: wrap; gap: 6px; }
+.st { all: unset; cursor: pointer; padding: 6px 12px; border-radius: 16px; font-size: .9em;
+  border: 1px solid var(--divider-color, #ccc); color: var(--primary-text-color); }
+.st.on { background: var(--primary-color, #03a9f4); border-color: var(--primary-color, #03a9f4);
+  color: var(--text-primary-color, #fff); }
+.st.danger { color: var(--error-color, #c00); border-color: var(--error-color, #c00); }
+.st.danger.confirm { background: var(--error-color, #c00); color: #fff; }
+.st:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 2px; }
+.st[disabled] { opacity: .5; cursor: default; }
 .msg { min-height: 1em; font-size: .9em; color: var(--secondary-text-color); margin: 10px 0 0; }
 `;
 

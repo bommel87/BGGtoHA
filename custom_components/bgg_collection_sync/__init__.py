@@ -33,7 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 CARD_URL = "/bgg_collection_sync/bgg-shelf-card.js"
-CARD_VERSION = "0.4.1"
+CARD_VERSION = "0.5.0"
 
 type BggConfigEntry = ConfigEntry[BggCoordinator]
 
