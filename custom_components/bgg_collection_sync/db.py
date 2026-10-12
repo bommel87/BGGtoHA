@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS games (
     version_language TEXT,
     last_modified    TEXT,
     synced_at        TEXT    NOT NULL,
+    collid           INTEGER,
+    prev_owned       INTEGER NOT NULL DEFAULT 0,
+    for_trade        INTEGER NOT NULL DEFAULT 0,
+    status           TEXT,
     PRIMARY KEY (username, bgg_id)
 );
 CREATE TABLE IF NOT EXISTS versions (
@@ -122,6 +126,14 @@ class BggDatabase:
                 con.execute(
                     "ALTER TABLE games ADD COLUMN subtype TEXT NOT NULL DEFAULT 'boardgame'"
                 )
+            for col, decl in (  # Migration von 0.4.x
+                ("collid", "INTEGER"),
+                ("prev_owned", "INTEGER NOT NULL DEFAULT 0"),
+                ("for_trade", "INTEGER NOT NULL DEFAULT 0"),
+                ("status", "TEXT"),
+            ):
+                if col not in cols:
+                    con.execute(f"ALTER TABLE games ADD COLUMN {col} {decl}")
 
     # ---- Sync-Cache -------------------------------------------------------
     def known_version_ids(self) -> set[int]:
@@ -200,12 +212,17 @@ class BggDatabase:
                 """INSERT OR REPLACE INTO games
                    (username, bgg_id, subtype, name, year, image, thumbnail, owned,
                     wishlist, want_to_play, num_plays, user_rating, bgg_rating,
-                    version_id, version_name, version_language, last_modified, synced_at)
+                    version_id, version_name, version_language, last_modified, synced_at,
+                    collid, prev_owned, for_trade, status)
                    VALUES (:username, :bgg_id, :subtype, :name, :year, :image, :thumbnail,
                     :owned, :wishlist, :want_to_play, :num_plays, :user_rating,
                     :bgg_rating, :version_id, :version_name, :version_language,
-                    :last_modified, :synced_at)""",
-                [{**r, "username": username, "synced_at": synced_at} for r in rows],
+                    :last_modified, :synced_at, :collid, :prev_owned, :for_trade, :status)""",
+                [
+                    {**r, "status": json.dumps(r["status"]), "username": username,
+                     "synced_at": synced_at}
+                    for r in rows
+                ],
             )
             con.execute(
                 "DELETE FROM games WHERE username = ? AND synced_at <> ?",
@@ -233,8 +250,12 @@ class BggDatabase:
         games = []
         for row in rows:
             game = dict(row)
-            for key in ("owned", "wishlist", "want_to_play"):
+            for key in ("owned", "wishlist", "want_to_play", "prev_owned", "for_trade"):
                 game[key] = bool(game[key])
+            try:
+                game["status"] = json.loads(game["status"]) if game["status"] else {}
+            except ValueError:
+                game["status"] = {}
             game["languages"] = _split(game["version_language"])
             for key in ("categories", "mechanics", "game_types"):
                 game[key] = _loads(game[key])
@@ -283,6 +304,30 @@ class BggDatabase:
             con.execute(
                 f"UPDATE game_meta SET {sets} WHERE username = ? AND bgg_id = ?",
                 (*[v or None for v in fields.values()], username, bgg_id),
+            )
+
+    # ---- BGG-Status (nach erfolgreichem Zurückschreiben) ------------------
+    def update_status(self, username: str, bgg_id: int, flags: dict[str, str]) -> None:
+        with closing(self._connect()) as con, con:
+            con.execute(
+                "UPDATE games SET owned = ?, prev_owned = ?, for_trade = ?, wishlist = ?, "
+                "want_to_play = ?, status = ? WHERE username = ? AND bgg_id = ?",
+                (
+                    int(flags.get("own") == "1"),
+                    int(flags.get("prevowned") == "1"),
+                    int(flags.get("fortrade") == "1"),
+                    int(flags.get("wishlist") == "1"),
+                    int(flags.get("wanttoplay") == "1"),
+                    json.dumps(flags),
+                    username,
+                    bgg_id,
+                ),
+            )
+
+    def delete_game(self, username: str, bgg_id: int) -> None:
+        with closing(self._connect()) as con, con:
+            con.execute(
+                "DELETE FROM games WHERE username = ? AND bgg_id = ?", (username, bgg_id)
             )
 
     # ---- Partien ----------------------------------------------------------
