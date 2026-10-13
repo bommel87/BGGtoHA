@@ -83,6 +83,18 @@ Die Kachel zeigt die laufende Partie mit Laufzeit. Mitspieler wählst du per Ant
 die Mitspieler schon vor **Partie starten** aus. Soll die Kachel nur bei laufender Partie erscheinen, packst du sie
 in eine `conditional`-Karte mit `state: running` auf dem Sitzungs-Sensor.
 
+**Punkte:** In der Kachel trägst du Punkte für dich und jeden Mitspieler ein. Bleibt der Gewinner auf
+„Automatisch“, gewinnt die höchste Punktzahl, bei Gleichstand gewinnen mehrere. Die Punkte gehen mit zu BGG. Per
+Dienst geht das über `scores` bei `end_play` und `log_play`, zum Beispiel `{"Anna": 42, "bommel87": 38}`. Dein
+BGG-Name steht dabei für dich.
+
+### Partie in BG Stats übernehmen (QR-Code)
+Nach **Beenden** zeigt die Kachel einen QR-Code und den Knopf **In BG Stats öffnen**. Scannst du den Code mit dem
+Handy oder tippst den Link auf dem Handy an, öffnet BG Stats den Import-Dialog mit Spiel, Datum, Dauer, Spielern,
+Punkten, Gewinner und Notiz. Dafür nutzt die Integration das offizielle Link-Format von BG Stats (`createPlay`).
+Für ältere Partien gibt es den Knopf **Letzte Partie an BG Stats** oder den Dienst `bgstats_link` mit `play_id`.
+Der Dienst liefert `url` und `qr_svg`. Mit `bgstats: false` in der Kachel blendest du das aus.
+
 ## Spielvorschlag
 `suggest_game` (`players`, `mode` any/cooperative/competitive, `game_type`
 any/family/strategy/party/abstract/thematic/wargame/children, `max_playtime`) mischt passende Spiele aus deinem
