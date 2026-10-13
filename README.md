@@ -71,16 +71,14 @@ Der Standort wird so gelesen: alles vor „Fach N“ ist der Regalname, N die Fa
 Standort im Stapel „Ohne Standort“. Suche hebt Treffer hervor; ein Klick auf eine Schachtel zeigt Details,
 erlaubt den Standort zu ändern (`set_game_meta`) und eine Partie zu starten.
 
-### Status bei BGG ändern
-Im Fenster eines Spiels: **Im Besitz**, **Zu verkaufen**, **Früher besessen** oder **Löschen** (mit Rückfrage).
-Die Änderung wird sofort zu BGG geschrieben und das Regal angepasst: „Zu verkaufen“ bleibt im Regal (€-Schild) und
-erscheint zusätzlich im Bereich *Zu verkaufen*; „Früher besessen“ wandert aus dem Regal in den Bereich
-*Früher besessen*; gelöschte Spiele verschwinden.
+### Status (Im Besitz / Zu verkaufen / Früher besessen)
+Der Status kommt aus deiner BGG-Sammlung: „Zu verkaufen“ (*For Trade*) bleibt im Regal (€-Schild) und erscheint
+zusätzlich im Bereich *Zu verkaufen*; „Früher besessen“ (*Previously Owned*) steht nicht mehr im Regal, sondern im
+Bereich *Früher besessen*; auf BGG gelöschte Spiele verschwinden.
 
-Dafür in den Optionen der Integration das **BGG-Passwort** eintragen. Die offizielle XML-API kann nur lesen, daher
-meldet sich die Integration wie ein Browser bei BGG an (inoffizielle Schnittstelle, kann sich ändern).
-Per Dienst: `bgg_collection_sync.set_bgg_status` mit `name`/`bgg_id` und `status`
-(`owned`, `for_sale`, `prev_owned`, `delete`).
+Ändern: im Fenster eines Spiels **Auf BGG ändern** öffnet das Spiel auf BGG. Dort den Sammlungsstatus anpassen –
+nach dem nächsten Sync (oder `bgg_collection_sync.sync_now`) zeigt das Regal den neuen Stand. Die BGG-API kann nur
+lesen, und die BGG-Webseite blockt automatische Änderungen, deshalb gibt es kein direktes Zurückschreiben.
 
 ## ESP32 Touch AMOLED (ESPHome)
 Ordner `esphome/`: `bgg-picker.yaml` (Hauptdatei), `ui.yaml` (Auswahl → Vorschlag → Ja/Nein → Standort + Start →
