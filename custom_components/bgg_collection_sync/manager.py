@@ -33,6 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 TAG_MAX_AGE = timedelta(minutes=10)
 BGSTATS_URL = "https://app.bgstatsapp.com/createPlay.html"
+BGSTATS_ADD_URL = "https://app.bgstatsapp.com/addPlay.html"
 
 
 def _winners(winner: str | None) -> set[str]:
@@ -546,6 +547,12 @@ class BggManager:
             data["comments"] = play["note"]
         payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
         return f"{BGSTATS_URL}?data={quote(payload, safe='')}"
+
+    async def async_bgstats_game_qr(self, game: dict[str, Any]) -> dict[str, Any]:
+        """QR-Code (SVG): öffnet in BG Stats eine neue Partie mit diesem Spiel."""
+        url = f"{BGSTATS_ADD_URL}?gameId={game['bgg_id']}"
+        svg = await self.hass.async_add_executor_job(_qr_svg, url)
+        return {"game": game["name"], "url": url, "qr_svg": svg}
 
     async def async_bgstats_link(self, play_id: int | None) -> dict[str, Any]:
         """BG Stats-Link + QR-Code (SVG) für eine beendete Partie (Standard: die letzte)."""

@@ -32,7 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor"]
 
 CARD_URL = "/bgg_collection_sync/bgg-shelf-card.js"
-CARD_VERSION = "0.8.1"
+CARD_VERSION = "0.9.0"
 
 type BggConfigEntry = ConfigEntry[BggCoordinator]
 
@@ -281,6 +281,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         players = _coordinator(hass, call).data.get("players", [])
         return {"count": len(players), "players": players}
 
+    async def handle_bgstats_game_qr(call: ServiceCall) -> dict:
+        c = _coordinator(hass, call)
+        return await c.manager.async_bgstats_game_qr(_game(c, call))
+
     async def handle_bgstats_link(call: ServiceCall) -> dict:
         return await _coordinator(hass, call).manager.async_bgstats_link(call.data.get("play_id"))
 
@@ -334,6 +338,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         supports_response=SupportsResponse.OPTIONAL)
     reg(DOMAIN, "remove_player", handle_remove_player, schema=REMOVE_PLAYER_SCHEMA)
     reg(DOMAIN, "get_players", handle_get_players, schema=ENTRY_ONLY_SCHEMA,
+        supports_response=SupportsResponse.ONLY)
+    reg(DOMAIN, "bgstats_game_qr", handle_bgstats_game_qr, schema=ASSIGN_TAG_SCHEMA,
         supports_response=SupportsResponse.ONLY)
     reg(DOMAIN, "bgstats_link", handle_bgstats_link, schema=BGSTATS_LINK_SCHEMA,
         supports_response=SupportsResponse.ONLY)

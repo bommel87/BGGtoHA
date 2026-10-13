@@ -156,6 +156,18 @@ log_play:
       selector:
         object:
 
+bgstats_game_qr:
+  fields:
+    bgg_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    name:
+      selector:
+        text:
+
 bgstats_link:
   fields:
     play_id:

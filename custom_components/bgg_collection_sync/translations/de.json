@@ -249,6 +249,20 @@
         }
       }
     },
+    "bgstats_game_qr": {
+      "name": "BG Stats: QR-Code für neue Partie",
+      "description": "QR-Code (SVG), der in BG Stats eine neue Partie mit diesem Spiel öffnet.",
+      "fields": {
+        "bgg_id": {
+          "name": "BGG-ID",
+          "description": "BGG-ID des Spiels (alternativ zum Namen)."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Spielname (eindeutiger Teil genügt)."
+        }
+      }
+    },
     "bgstats_link": {
       "name": "BG Stats-Link / QR-Code",
       "description": "Erzeugt den Import-Link für BG Stats und einen QR-Code (SVG) für eine beendete Partie.",

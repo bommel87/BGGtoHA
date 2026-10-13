@@ -330,6 +330,10 @@ class BggShelfCard extends HTMLElement {
           <label>Fach <input id="fach" type="number" min="1" max="20" value="${fach ?? ""}"></label>
         </div>
         ${current === "prev_owned" ? "" : `<h3>Mitspieler</h3>${pickerHtml(bggPlayers(this._hass), this._picked)}`}
+        <h3>BG Stats</h3>
+        <button class="linkbtn" id="qrbtn">${this._qr ? "QR-Code ausblenden" : "QR-Code: neue Partie in BG Stats"}</button>
+        ${this._qr ? `<div class="qr">${this._qr}</div>
+          <p class="hint">Mit dem Handy scannen – BG Stats öffnet eine neue Partie mit diesem Spiel.</p>` : ""}
         <h3>Zuordnungen</h3>
         <div class="meta">
           <label>NFC-Tag
@@ -380,6 +384,33 @@ class BggShelfCard extends HTMLElement {
       },
       "Gespeichert"
     );
+  }
+
+  async _toggleQr() {
+    if (this._qr) {
+      this._qr = null;
+    } else {
+      try {
+        const res = await this._hass.callWS({
+          type: "call_service",
+          domain: DOMAIN,
+          service: "bgstats_game_qr",
+          service_data: { bgg_id: this._selected },
+          return_response: true,
+        });
+        this._qr = res.response.qr_svg;
+      } catch (err) {
+        this._msg = err?.message || String(err);
+      }
+    }
+    // Neuzeichnen, ohne ungespeicherte Eingaben und Mitspieler-Auswahl zu verlieren
+    const root = this.shadowRoot;
+    const keep = ["shelf", "fach", "nfc", "spotify", "light"].map((id) => [id, root.getElementById(id)?.value]);
+    this._render();
+    keep.forEach(([id, v]) => {
+      const el = this.shadowRoot.getElementById(id);
+      if (el && v != null) el.value = v;
+    });
   }
 
   async _scan() {
@@ -465,6 +496,7 @@ class BggShelfCard extends HTMLElement {
         this._selected = Number(b.dataset.id);
         this._msg = "";
         this._picked = new Set();
+        this._qr = null;
         this._render();
       })
     );
@@ -477,6 +509,7 @@ class BggShelfCard extends HTMLElement {
     );
     root.getElementById("save")?.addEventListener("click", () => this._save());
     root.getElementById("scan")?.addEventListener("click", () => this._scan());
+    root.getElementById("qrbtn")?.addEventListener("click", () => this._toggleQr());
     if (this._selected != null) bindPicker(root.querySelector(".dialog"), this._picked);
     root.getElementById("play")?.addEventListener("click", () => {
       const data = { bgg_id: this._selected };
@@ -542,6 +575,10 @@ ul { margin: 0; padding-left: 18px; font-size: .9em; }
   background: var(--card-background-color, #fff); color: var(--primary-text-color); }
 #shelf { flex: 1 1 160px; min-width: 0; }
 #fach { width: 64px; margin-left: 4px; }
+.linkbtn { all: unset; cursor: pointer; color: var(--primary-color, #03a9f4); font-weight: 500; }
+.linkbtn:hover, .linkbtn:focus-visible { text-decoration: underline; }
+.qr { background: #fff; padding: 8px; border-radius: 8px; width: min(200px, 100%); box-sizing: border-box; margin-top: 10px; }
+.qr svg { display: block; width: 100%; height: auto; }
 .meta { display: flex; flex-direction: column; gap: 10px; }
 .meta label { display: flex; flex-direction: column; gap: 4px; font-size: .85em; color: var(--secondary-text-color); }
 .meta input, .meta select { padding: 8px; border-radius: 6px; font: inherit; font-size: 1rem; min-width: 0;
