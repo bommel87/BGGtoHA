@@ -400,17 +400,25 @@ def _parse_set_cookies(values: list[str]) -> dict[str, str]:
     Bewusst ohne http.cookies: dessen strenger Parser verwirft bei ungewöhnlichen
     Werten/Attributen den ganzen Header (dann fehlt die BGG-Sitzung).
     """
-    cookies: dict[str, str] = {}
+    # BGG setzt beim Login die Sitzung ohne domain-Attribut und löscht im selben Zug
+    # gleichnamige alte Cookies mit domain=.boardgamegeek.com. Das sind verschiedene
+    # Cookies -> nach (Name, Domain) unterscheiden, sonst löscht das zweite das erste.
+    jar: dict[tuple[str, str], str] = {}
     for raw in values:
-        name, sep, value = raw.split(";", 1)[0].strip().partition("=")
+        first, _, rest = raw.partition(";")
+        name, sep, value = first.strip().partition("=")
         if not sep or not name:
             continue
-        attrs = raw.lower()
-        if value in ("", "deleted") or "max-age=0" in attrs or "expires=thu, 01-jan-1970" in attrs:
-            cookies.pop(name, None)
+        attrs = [a.strip().lower() for a in rest.split(";")]
+        domain = next((a[7:].lstrip(".") for a in attrs if a.startswith("domain=")), "")
+        expired = value in ("", "deleted") or "max-age=0" in attrs or any(
+            a.startswith("expires=") and "1970" in a for a in attrs
+        )
+        if expired:
+            jar.pop((name, domain), None)
         else:
-            cookies[name] = value
-    return cookies
+            jar[(name, domain)] = value
+    return {name: value for (name, _), value in jar.items()}
 
 
 class BggWebClient:
