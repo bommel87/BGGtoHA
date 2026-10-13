@@ -162,7 +162,10 @@ class BggManager:
 
     # ---- Partien ----------------------------------------------------------
     async def async_start_play(
-        self, game: dict[str, Any] | None = None, players: int | None = None
+        self,
+        game: dict[str, Any] | None = None,
+        players: int | None = None,
+        player_names: list[str] | None = None,
     ) -> dict[str, Any]:
         if game is None:
             s = self.suggestion
@@ -176,6 +179,8 @@ class BggManager:
         if active:
             raise ServiceValidationError(f"Es läuft bereits ein Spiel: {active['game_name']}")
 
+        lineup = self.resolve_players(player_names, None)
+        players = players or (len(lineup) + 1 if lineup else None)
         now = dt_util.utcnow()
         await self.hass.async_add_executor_job(
             self.coordinator.db.start_play,
@@ -184,6 +189,7 @@ class BggManager:
             game["name"],
             players,
             now.isoformat(),
+            lineup,
         )
         await self._apply_start(game)
         self._reset_suggestion_state()
@@ -195,6 +201,7 @@ class BggManager:
                 "name": game["name"],
                 "location": game["location"],
                 "players": players,
+                "player_names": [p["name"] for p in lineup],
             },
         )
         return {"game": game["name"], "location": game["location"]}
@@ -231,6 +238,8 @@ class BggManager:
         ended = dt_util.utcnow()
         started = dt_util.parse_datetime(active["started_at"]) or ended
         duration = max(1, round((ended - started).total_seconds() / 60))
+        if player_names is None:  # beim Start gewählte Mitspieler übernehmen
+            player_names = [p["name"] for p in active["player_names"]]
         lineup = self.resolve_players(player_names, winner)
         players = players or (len(lineup) + 1 if lineup else active["players"])
         await self.hass.async_add_executor_job(

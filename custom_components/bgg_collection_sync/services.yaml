@@ -73,6 +73,11 @@ start_play:
           min: 1
           max: 20
           mode: box
+    player_names:
+      example: "Anna, Ben"
+      selector:
+        text:
+          multiple: true
 
 end_play:
   fields:

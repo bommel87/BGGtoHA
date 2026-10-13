@@ -58,7 +58,9 @@ SET_META_SCHEMA = vol.Schema(
         vol.Optional("light_scene"): cv.string,
     }
 )
-START_PLAY_SCHEMA = vol.Schema({**_GAME, vol.Optional("players"): _PLAYERS})
+START_PLAY_SCHEMA = vol.Schema(
+    {**_GAME, vol.Optional("players"): _PLAYERS, vol.Optional("player_names"): _PLAYER_NAMES}
+)
 END_PLAY_SCHEMA = vol.Schema(
     {
         **_ENTRY,
@@ -223,7 +225,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle_start_play(call: ServiceCall) -> dict:
         c = _coordinator(hass, call)
         game = _game(c, call) if ("bgg_id" in call.data or "name" in call.data) else None
-        return await c.manager.async_start_play(game, call.data.get("players"))
+        return await c.manager.async_start_play(
+            game, call.data.get("players"), call.data.get("player_names")
+        )
 
     async def handle_end_play(call: ServiceCall) -> dict:
         c = _coordinator(hass, call)

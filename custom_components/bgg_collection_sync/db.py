@@ -360,13 +360,19 @@ class BggDatabase:
 
     # ---- Partien ----------------------------------------------------------
     def start_play(
-        self, username: str, bgg_id: int, name: str, players: int | None, started_at: str
+        self,
+        username: str,
+        bgg_id: int,
+        name: str,
+        players: int | None,
+        started_at: str,
+        player_names: list[dict[str, Any]] | None = None,
     ) -> int:
         with closing(self._connect()) as con, con:
             cur = con.execute(
-                "INSERT INTO plays (username, bgg_id, game_name, started_at, players, source) "
-                "VALUES (?, ?, ?, ?, ?, 'session')",
-                (username, bgg_id, name, started_at, players),
+                "INSERT INTO plays (username, bgg_id, game_name, started_at, players, source, "
+                "player_names) VALUES (?, ?, ?, ?, ?, 'session', ?)",
+                (username, bgg_id, name, started_at, players, _dumps(player_names)),
             )
             return cur.lastrowid
 
@@ -377,7 +383,7 @@ class BggDatabase:
                 "ORDER BY id DESC LIMIT 1",
                 (username,),
             ).fetchone()
-        return dict(row) if row else None
+        return _play(row) if row else None
 
     def end_play(
         self,

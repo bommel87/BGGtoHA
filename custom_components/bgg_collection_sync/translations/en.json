@@ -148,6 +148,10 @@
         "players": {
           "name": "Players",
           "description": "Number of players."
+        },
+        "player_names": {
+          "name": "Players",
+          "description": "Names or BGG usernames of the other players (without you). Used when the play ends."
         }
       }
     },

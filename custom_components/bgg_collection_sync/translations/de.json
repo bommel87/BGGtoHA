@@ -148,6 +148,10 @@
         "players": {
           "name": "Spieleranzahl",
           "description": "Anzahl der Mitspielenden."
+        },
+        "player_names": {
+          "name": "Mitspieler",
+          "description": "Namen oder BGG-Benutzernamen der Mitspielenden (ohne dich). Werden beim Beenden übernommen."
         }
       }
     },

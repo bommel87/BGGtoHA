@@ -150,14 +150,17 @@ class BggSensor(CoordinatorEntity[BggCoordinator], SensorEntity):
             return {"last_play": data["last_play"]} if data["last_play"] else None
         if key == "session":
             active = data["active_play"]
+            me = {"bgg_user": self.coordinator.client.username}
             if not active:
-                return None
+                return me
             return {
+                **me,
                 "name": active["game_name"],
                 "bgg_id": active["bgg_id"],
                 "started_at": active["started_at"],
                 "players": active["players"],
                 "location": active["location"],
+                "player_names": [p["name"] for p in active["player_names"]],
             }
         if key == "suggestion":
             return {k: v for k, v in self.coordinator.manager.suggestion.items() if k != "phase"}
