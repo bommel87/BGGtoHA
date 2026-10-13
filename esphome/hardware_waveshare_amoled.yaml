@@ -1,6 +1,7 @@
 # Hardware: Waveshare ESP32-S3-Touch-AMOLED-1.75 (Standard / -G, NICHT die 1.75C)
 #   Display: 1,75" rund, 466x466, Treiber CO5300 über QSPI
-#   Touch:   CST9217 über I2C (0x5A) - externe Komponente, benötigt esp-idf
+#   Touch:   CST9217 über I2C (0x5A) - Komponente liegt in components/cst9217
+#            (Kopie von github.com/shelson/esphome-cst9217, MIT, für ESPHome 2026.x gepatcht)
 #   PMIC:    AXP2101 (0x34), versorgt das Panel über BLDO1
 # Pins aus dem offiziellen Waveshare-Repo (pin_config.h), gegengeprüft mit
 # github.com/socquique/TamaPoke und devices.esphome.io.
@@ -8,7 +9,9 @@
 # Stellt bereit, was ui.yaml erwartet:  main_display, main_touch
 
 external_components:
-  - source: github://shelson/esphome-cst9217
+  - source:
+      type: local
+      path: components
     components: [cst9217]
 
 esphome:

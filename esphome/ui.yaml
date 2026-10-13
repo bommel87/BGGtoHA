@@ -195,13 +195,13 @@ lvgl:
                   variables:
                     mode: !lambda |-
                       static const char *v[] = {"any", "cooperative", "competitive"};
-                      return std::string(v[lv_roller_get_selected(id(roller_mode))]);
+                      return std::string(v[id(roller_mode)->get_selected_index()]);
                     gtype: !lambda |-
                       static const char *v[] = {"any", "family", "strategy", "party",
                                                 "abstract", "thematic", "wargame", "children"};
-                      return std::string(v[lv_roller_get_selected(id(roller_type))]);
+                      return std::string(v[id(roller_type)->get_selected_index()]);
                     players: !lambda |-
-                      return std::to_string(lv_roller_get_selected(id(roller_players)) + 1);
+                      return std::to_string(id(roller_players)->get_selected_index() + 1);
 
     # ------------------------------------------------------------ Vorschlag
     - id: page_suggest
