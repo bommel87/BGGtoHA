@@ -102,6 +102,10 @@ end_play:
       selector:
         text:
           multiple: true
+    scores:
+      example: '{"Anna": 42, "Ben": 38}'
+      selector:
+        object:
 
 cancel_play:
 
@@ -147,6 +151,23 @@ log_play:
       selector:
         text:
           multiple: true
+    scores:
+      example: '{"Anna": 42, "Ben": 38}'
+      selector:
+        object:
+
+bgstats_link:
+  fields:
+    play_id:
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync
 
 upload_play:
   fields:

@@ -178,6 +178,10 @@
         "player_names": {
           "name": "Mitspieler",
           "description": "Namen oder BGG-Benutzernamen der Mitspielenden (ohne dich). Bekannte Mitspieler werden mit ihrem BGG-Account geloggt."
+        },
+        "scores": {
+          "name": "Punkte",
+          "description": "Punkte je Spieler, z. B. {\"Anna\": 42, \"bommel87\": 38}. Dein BGG-Name steht für dich. Ohne Gewinner gewinnt die höchste Punktzahl."
         }
       }
     },
@@ -224,6 +228,10 @@
         "player_names": {
           "name": "Mitspieler",
           "description": "Namen oder BGG-Benutzernamen der Mitspielenden (ohne dich). Bekannte Mitspieler werden mit ihrem BGG-Account geloggt."
+        },
+        "scores": {
+          "name": "Punkte",
+          "description": "Punkte je Spieler, z. B. {\"Anna\": 42, \"bommel87\": 38}. Dein BGG-Name steht für dich. Ohne Gewinner gewinnt die höchste Punktzahl."
         }
       }
     },
@@ -234,6 +242,20 @@
         "play_id": {
           "name": "Partie-ID",
           "description": "Lokale ID der Partie (Feld id aus get_plays)."
+        },
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account verwenden."
+        }
+      }
+    },
+    "bgstats_link": {
+      "name": "BG Stats-Link / QR-Code",
+      "description": "Erzeugt den Import-Link für BG Stats und einen QR-Code (SVG) für eine beendete Partie.",
+      "fields": {
+        "play_id": {
+          "name": "Partie-ID",
+          "description": "Lokale ID der Partie (Standard: die zuletzt beendete)."
         },
         "entry_id": {
           "name": "Eintrag",
