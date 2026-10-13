@@ -64,6 +64,7 @@ END_PLAY_SCHEMA = vol.Schema(
         vol.Optional("winner"): cv.string,
         vol.Optional("note"): cv.string,
         vol.Optional("players"): _PLAYERS,
+        vol.Optional("upload_to_bgg"): cv.boolean,
     }
 )
 LOG_PLAY_SCHEMA = vol.Schema(
@@ -74,8 +75,10 @@ LOG_PLAY_SCHEMA = vol.Schema(
         vol.Optional("players"): _PLAYERS,
         vol.Optional("winner"): cv.string,
         vol.Optional("note"): cv.string,
+        vol.Optional("upload_to_bgg"): cv.boolean,
     }
 )
+UPLOAD_PLAY_SCHEMA = vol.Schema({**_ENTRY, vol.Required("play_id"): vol.Coerce(int)})
 GET_PLAYS_SCHEMA = vol.Schema(
     {
         **_GAME,
@@ -218,7 +221,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle_end_play(call: ServiceCall) -> dict:
         c = _coordinator(hass, call)
         return await c.manager.async_end_play(
-            call.data.get("winner"), call.data.get("note"), call.data.get("players")
+            call.data.get("winner"),
+            call.data.get("note"),
+            call.data.get("players"),
+            call.data.get("upload_to_bgg"),
         )
 
     async def handle_cancel_play(call: ServiceCall) -> None:
@@ -234,7 +240,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             call.data.get("players"),
             call.data.get("winner"),
             call.data.get("note"),
+            call.data.get("upload_to_bgg"),
         )
+
+    async def handle_upload_play(call: ServiceCall) -> dict:
+        return await _coordinator(hass, call).manager.async_upload_play(call.data["play_id"])
 
     async def handle_get_plays(call: ServiceCall) -> dict:
         c = _coordinator(hass, call)
@@ -278,6 +288,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     reg(DOMAIN, "cancel_play", handle_cancel_play, schema=ENTRY_ONLY_SCHEMA)
     reg(DOMAIN, "log_play", handle_log_play, schema=LOG_PLAY_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "upload_play", handle_upload_play, schema=UPLOAD_PLAY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
     reg(DOMAIN, "get_plays", handle_get_plays, schema=GET_PLAYS_SCHEMA,
         supports_response=SupportsResponse.ONLY)
     reg(DOMAIN, "suggest_game", handle_suggest, schema=SUGGEST_SCHEMA,
@@ -289,10 +301,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: BggConfigEntry) -> bool:
-    if "bgg_password" in entry.options:  # aus 0.5.x, wird nicht mehr gebraucht
-        hass.config_entries.async_update_entry(
-            entry, options={k: v for k, v in entry.options.items() if k != "bgg_password"}
-        )
     client = BggClient(
         async_get_clientsession(hass),
         entry.data[CONF_USERNAME],
