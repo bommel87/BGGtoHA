@@ -95,6 +95,14 @@ Punkten, Gewinner und Notiz. Dafür nutzt die Integration das offizielle Link-Fo
 Für ältere Partien gibt es den Knopf **Letzte Partie an BG Stats** oder den Dienst `bgstats_link` mit `play_id`.
 Der Dienst liefert `url` und `qr_svg`. Mit `bgstats: false` in der Kachel blendest du das aus.
 
+Im Fenster eines Spiels in der Regalkarte zeigt **QR-Code: neue Partie in BG Stats** einen Code, der in BG Stats eine
+neue Partie mit diesem Spiel öffnet. Als Dienst heißt das `bgstats_game_qr`.
+
+### Zuordnungen im Spiel-Fenster
+Im Fenster eines Spiels in der Regalkarte siehst und änderst du neben dem Standort auch **NFC-Tag**,
+**Spotify-Playlist** und **Lichtprofil** (Szene oder Skript). **Gescannten übernehmen** ordnet den Tag zu, der in den
+letzten 10 Minuten gescannt wurde. **Speichern** übernimmt alle Felder, ein leeres Feld löscht die Zuordnung.
+
 ## Spielvorschlag
 `suggest_game` (`players`, `mode` any/cooperative/competitive, `game_type`
 any/family/strategy/party/abstract/thematic/wargame/children, `max_playtime`) mischt passende Spiele aus deinem
