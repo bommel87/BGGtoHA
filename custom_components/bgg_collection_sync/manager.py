@@ -223,6 +223,7 @@ class BggManager:
         note: str | None = None,
         players: int | None = None,
         upload: bool | None = None,
+        player_names: list[str] | None = None,
     ) -> dict[str, Any]:
         active = self.coordinator.data["active_play"]
         if not active:
@@ -230,7 +231,8 @@ class BggManager:
         ended = dt_util.utcnow()
         started = dt_util.parse_datetime(active["started_at"]) or ended
         duration = max(1, round((ended - started).total_seconds() / 60))
-        players = players or active["players"]
+        lineup = self.resolve_players(player_names, winner)
+        players = players or (len(lineup) + 1 if lineup else active["players"])
         await self.hass.async_add_executor_job(
             self.coordinator.db.end_play,
             active["id"],
@@ -239,6 +241,7 @@ class BggManager:
             players,
             winner,
             note,
+            lineup,
         )
         await self._apply_end()
         await self.coordinator.async_refresh_local()
@@ -250,6 +253,7 @@ class BggManager:
                 "duration_min": duration,
                 "players": players,
                 "winner": winner,
+                "player_names": [p["name"] for p in lineup],
             },
         )
         result = {"game": active["game_name"], "duration_min": duration, "players": players}
@@ -281,9 +285,12 @@ class BggManager:
         winner: str | None,
         note: str | None,
         upload: bool | None = None,
+        player_names: list[str] | None = None,
     ) -> dict[str, Any]:
         start = played_at or dt_util.utcnow()
         end = start + timedelta(minutes=duration_min or 0)
+        lineup = self.resolve_players(player_names, winner)
+        players = players or (len(lineup) + 1 if lineup else None)
         play_id = await self.hass.async_add_executor_job(
             self.coordinator.db.add_play,
             self._username,
@@ -295,10 +302,83 @@ class BggManager:
             players,
             winner,
             note,
+            lineup,
         )
         await self.coordinator.async_refresh_local()
         result = {"game": game["name"], "played_at": start.isoformat()}
         return {**result, **await self._maybe_upload(play_id, upload)}
+
+    # ---- Mitspieler -------------------------------------------------------
+    def find_player(self, name: str) -> dict[str, Any] | None:
+        """Bekannten Mitspieler per Name oder BGG-Benutzername finden."""
+        needle = name.strip().lower()
+        for p in self.coordinator.data.get("players", []):
+            if p["name"].lower() == needle or (p["bgg_username"] or "").lower() == needle:
+                return p
+        return None
+
+    def resolve_players(
+        self, names: list[str] | None, winner: str | None
+    ) -> list[dict[str, Any]]:
+        """Namen -> [{name, bgg_username, win}]; unbekannte Namen bleiben reine Namen.
+
+        Steht der Gewinner nicht in der Liste (und bist es nicht du), wird er ergänzt.
+        """
+        if not names:
+            return []
+        me = self._username.lower()
+        win = (winner or "").strip().lower()
+        lineup: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in [*names, *([winner] if winner else [])]:
+            name = (raw or "").strip()
+            if not name or name.lower() == me:
+                continue
+            known = self.find_player(name)
+            entry = {
+                "name": known["name"] if known else name,
+                "bgg_username": known["bgg_username"] if known else None,
+            }
+            ident = (entry["bgg_username"] or entry["name"]).lower()
+            if ident in seen:
+                continue
+            seen.add(ident)
+            entry["win"] = win in (name.lower(), entry["name"].lower(),
+                                   (entry["bgg_username"] or "").lower())
+            lineup.append(entry)
+        return lineup
+
+    async def async_set_player(self, name: str, bgg_username: str | None) -> dict[str, Any]:
+        """Mitspieler anlegen oder mit einem BGG-Account verknüpfen (leer = Verknüpfung lösen)."""
+        name = name.strip()
+        bgg_username = (bgg_username or "").strip() or None
+        if not name:
+            raise ServiceValidationError("Name angeben")
+        if bgg_username:
+            if bgg_username.lower() == self._username.lower():
+                raise ServiceValidationError("Das ist dein eigener BGG-Account")
+            try:
+                exists = await self.coordinator.client.user_exists(bgg_username)
+            except BggError as err:
+                raise HomeAssistantError(f"BGG-Benutzer konnte nicht geprüft werden: {err}") from err
+            if not exists:
+                raise ServiceValidationError(f"BGG-Benutzer '{bgg_username}' gibt es nicht")
+        await self.hass.async_add_executor_job(
+            self.coordinator.db.set_player, self._username, name, bgg_username
+        )
+        await self.coordinator.async_refresh_local()
+        return {"name": name, "bgg_username": bgg_username}
+
+    async def async_remove_player(self, name: str) -> None:
+        removed = await self.hass.async_add_executor_job(
+            self.coordinator.db.remove_player, self._username, name.strip()
+        )
+        if not removed:
+            raise ServiceValidationError(
+                f"'{name}' ist kein selbst angelegter Mitspieler "
+                "(Mitspieler aus BGG-Partien lassen sich nicht entfernen)"
+            )
+        await self.coordinator.async_refresh_local()
 
     # ---- Partien auf BGG loggen ------------------------------------------
     def _web(self) -> BggWebClient:
@@ -324,7 +404,6 @@ class BggManager:
         if play["bgg_play_id"] is not None:
             raise ServiceValidationError("Die Partie ist bereits auf BGG geloggt")
         started = dt_util.parse_datetime(play["started_at"]) or dt_util.utcnow()
-        winner = (play["winner"] or "").strip()
         web = self._web()
         try:
             bgg_play_id = await web.log_play(
@@ -332,7 +411,7 @@ class BggManager:
                 dt_util.as_local(started).date().isoformat(),
                 play["duration_min"],
                 play["note"],
-                [{"name": winner, "win": 1}] if winner else None,
+                self._bgg_players(play),
             )
         except BggAuthError as err:
             self._web_client = None
@@ -342,6 +421,23 @@ class BggManager:
         # 0 = hochgeladen, aber BGG hat keine ID genannt (verhindert Doppel-Upload)
         await self.hass.async_add_executor_job(db.set_bgg_play_id, play_id, bgg_play_id or 0)
         return {"play_id": play_id, "bgg_play_id": bgg_play_id}
+
+    def _bgg_players(self, play: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """Spielerliste für BGG: du selbst + Mitspieler (mit BGG-Account, falls bekannt)."""
+        winner = (play["winner"] or "").strip()
+        lineup = play["player_names"]
+        if not lineup:  # nur Gewinner bekannt (wie bisher)
+            return [{"name": winner, "win": 1}] if winner else None
+        me = self._username
+        result = [
+            {"name": me, "username": me, "win": int(winner.lower() == me.lower())}
+        ]
+        for p in lineup:
+            entry = {"name": p["name"], "win": int(bool(p.get("win")))}
+            if p.get("bgg_username"):
+                entry["username"] = p["bgg_username"]
+            result.append(entry)
+        return result
 
     async def _maybe_upload(self, play_id: int, upload: bool | None) -> dict[str, Any]:
         """Upload nach dem lokalen Speichern; Fehler verwerfen die Partie nicht."""

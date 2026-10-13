@@ -8,13 +8,13 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 
-from .api import BggClient
+from .api import BggClient, BggError
 from .const import (
     CONF_TOKEN,
     CONF_USERNAME,
@@ -39,6 +39,7 @@ type BggConfigEntry = ConfigEntry[BggCoordinator]
 _ENTRY = {vol.Optional("entry_id"): cv.string}
 _GAME = {**_ENTRY, vol.Optional("bgg_id"): vol.Coerce(int), vol.Optional("name"): cv.string}
 _PLAYERS = vol.All(vol.Coerce(int), vol.Range(min=1, max=99))
+_PLAYER_NAMES = vol.All(cv.ensure_list, [cv.string])
 
 GET_GAMES_SCHEMA = vol.Schema(
     {
@@ -65,6 +66,7 @@ END_PLAY_SCHEMA = vol.Schema(
         vol.Optional("note"): cv.string,
         vol.Optional("players"): _PLAYERS,
         vol.Optional("upload_to_bgg"): cv.boolean,
+        vol.Optional("player_names"): _PLAYER_NAMES,
     }
 )
 LOG_PLAY_SCHEMA = vol.Schema(
@@ -76,9 +78,14 @@ LOG_PLAY_SCHEMA = vol.Schema(
         vol.Optional("winner"): cv.string,
         vol.Optional("note"): cv.string,
         vol.Optional("upload_to_bgg"): cv.boolean,
+        vol.Optional("player_names"): _PLAYER_NAMES,
     }
 )
 UPLOAD_PLAY_SCHEMA = vol.Schema({**_ENTRY, vol.Required("play_id"): vol.Coerce(int)})
+SET_PLAYER_SCHEMA = vol.Schema(
+    {**_ENTRY, vol.Required("name"): cv.string, vol.Optional("bgg_username"): cv.string}
+)
+REMOVE_PLAYER_SCHEMA = vol.Schema({**_ENTRY, vol.Required("name"): cv.string})
 GET_PLAYS_SCHEMA = vol.Schema(
     {
         **_GAME,
@@ -225,6 +232,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             call.data.get("note"),
             call.data.get("players"),
             call.data.get("upload_to_bgg"),
+            call.data.get("player_names"),
         )
 
     async def handle_cancel_play(call: ServiceCall) -> None:
@@ -241,7 +249,27 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             call.data.get("winner"),
             call.data.get("note"),
             call.data.get("upload_to_bgg"),
+            call.data.get("player_names"),
         )
+
+    async def handle_sync_players(call: ServiceCall) -> None:
+        for entry in _loaded_entries(hass, call.data.get("entry_id")):
+            try:
+                await entry.runtime_data.async_sync_players()
+            except BggError as err:
+                raise HomeAssistantError(f"Partien von BGG nicht geladen: {err}") from err
+
+    async def handle_set_player(call: ServiceCall) -> dict:
+        return await _coordinator(hass, call).manager.async_set_player(
+            call.data["name"], call.data.get("bgg_username")
+        )
+
+    async def handle_remove_player(call: ServiceCall) -> None:
+        await _coordinator(hass, call).manager.async_remove_player(call.data["name"])
+
+    async def handle_get_players(call: ServiceCall) -> dict:
+        players = _coordinator(hass, call).data.get("players", [])
+        return {"count": len(players), "players": players}
 
     async def handle_upload_play(call: ServiceCall) -> dict:
         return await _coordinator(hass, call).manager.async_upload_play(call.data["play_id"])
@@ -288,6 +316,12 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     reg(DOMAIN, "cancel_play", handle_cancel_play, schema=ENTRY_ONLY_SCHEMA)
     reg(DOMAIN, "log_play", handle_log_play, schema=LOG_PLAY_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "sync_players", handle_sync_players, schema=ENTRY_ONLY_SCHEMA)
+    reg(DOMAIN, "set_player", handle_set_player, schema=SET_PLAYER_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL)
+    reg(DOMAIN, "remove_player", handle_remove_player, schema=REMOVE_PLAYER_SCHEMA)
+    reg(DOMAIN, "get_players", handle_get_players, schema=ENTRY_ONLY_SCHEMA,
+        supports_response=SupportsResponse.ONLY)
     reg(DOMAIN, "upload_play", handle_upload_play, schema=UPLOAD_PLAY_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL)
     reg(DOMAIN, "get_plays", handle_get_plays, schema=GET_PLAYS_SCHEMA,
