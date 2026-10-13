@@ -17,7 +17,6 @@ from .const import (
     CONF_INTERVAL_HOURS,
     CONF_MEDIA_PLAYER,
     CONF_ONLY_OWNED,
-    CONF_PASSWORD,
     CONF_TOKEN,
     CONF_USERNAME,
     DEFAULT_INCLUDE_EXPANSIONS,
@@ -126,12 +125,6 @@ class BggOptionsFlow(OptionsFlow):
                         description={"suggested_value": opts.get(CONF_END_SCENE)},
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain=["scene", "script"])
-                    ),
-                    vol.Optional(
-                        CONF_PASSWORD,
-                        description={"suggested_value": opts.get(CONF_PASSWORD)},
-                    ): selector.TextSelector(
-                        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
                     ),
                 }
             ),

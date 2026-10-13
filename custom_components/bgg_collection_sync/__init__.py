@@ -16,7 +16,6 @@ from homeassistant.util import dt as dt_util
 
 from .api import BggClient
 from .const import (
-    BGG_STATUSES,
     CONF_TOKEN,
     CONF_USERNAME,
     DB_FILENAME,
@@ -94,7 +93,6 @@ SUGGEST_SCHEMA = vol.Schema(
 )
 ENTRY_ONLY_SCHEMA = vol.Schema(_ENTRY)
 ASSIGN_TAG_SCHEMA = vol.Schema(_GAME)
-SET_STATUS_SCHEMA = vol.Schema({**_GAME, vol.Required("status"): vol.In(BGG_STATUSES)})
 
 
 def _loaded_entries(hass: HomeAssistant, entry_id: str | None = None) -> list[BggConfigEntry]:
@@ -266,10 +264,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle_reset(call: ServiceCall) -> None:
         _coordinator(hass, call).manager.reset()
 
-    async def handle_set_status(call: ServiceCall) -> dict:
-        c = _coordinator(hass, call)
-        return await c.manager.async_set_bgg_status(_game(c, call), call.data["status"])
-
     reg = hass.services.async_register
     reg(DOMAIN, SERVICE_SYNC_NOW, handle_sync_now)
     reg(DOMAIN, SERVICE_GET_GAMES, handle_get_games, schema=GET_GAMES_SCHEMA,
@@ -291,12 +285,14 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     reg(DOMAIN, "reject_suggestion", handle_reject, schema=ENTRY_ONLY_SCHEMA)
     reg(DOMAIN, "accept_suggestion", handle_accept, schema=ENTRY_ONLY_SCHEMA)
     reg(DOMAIN, "reset_suggestion", handle_reset, schema=ENTRY_ONLY_SCHEMA)
-    reg(DOMAIN, "set_bgg_status", handle_set_status, schema=SET_STATUS_SCHEMA,
-        supports_response=SupportsResponse.OPTIONAL)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: BggConfigEntry) -> bool:
+    if "bgg_password" in entry.options:  # aus 0.5.x, wird nicht mehr gebraucht
+        hass.config_entries.async_update_entry(
+            entry, options={k: v for k, v in entry.options.items() if k != "bgg_password"}
+        )
     client = BggClient(
         async_get_clientsession(hass),
         entry.data[CONF_USERNAME],

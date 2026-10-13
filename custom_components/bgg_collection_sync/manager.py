@@ -9,11 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.util import dt as dt_util
 
-from .api import BggAuthError, BggError, BggWebClient
-from .const import CONF_END_SCENE, CONF_MEDIA_PLAYER, CONF_PASSWORD, DOMAIN
+from .const import CONF_END_SCENE, CONF_MEDIA_PLAYER, DOMAIN
 from .logic import filter_games, normalize_spotify, spotify_media_type, summary_line
 
 if TYPE_CHECKING:
@@ -37,7 +35,6 @@ class BggManager:
         self._last_tag: tuple[str, datetime] | None = None
         self._started_playback = False
         self._unsub = None
-        self._web_client: BggWebClient | None = None
 
     # ---- Lebenszyklus -----------------------------------------------------
     @callback
@@ -113,44 +110,6 @@ class BggManager:
             self.coordinator.db.set_meta, self._username, game["bgg_id"], fields
         )
         await self.coordinator.async_refresh_local()
-
-    # ---- BGG-Status zurückschreiben ---------------------------------------
-    def _web(self) -> BggWebClient:
-        password = self._options.get(CONF_PASSWORD)
-        if not password:
-            raise ServiceValidationError(
-                "Für Änderungen auf BGG das BGG-Passwort in den Optionen der Integration eintragen"
-            )
-        if self._web_client is None:
-            self._web_client = BggWebClient(
-                async_create_clientsession(self.hass), self._username, password
-            )
-        return self._web_client
-
-    async def async_set_bgg_status(self, game: dict[str, Any], target: str) -> dict[str, Any]:
-        """Status auf BGG ändern (owned/for_sale/prev_owned/delete) und lokal übernehmen."""
-        if not game.get("collid"):
-            raise ServiceValidationError(
-                f"Für '{game['name']}' fehlt die BGG-Sammlungs-ID – bitte erst synchronisieren"
-            )
-        web = self._web()
-        run = self.hass.async_add_executor_job
-        try:
-            if target == "delete":
-                await web.delete(game["collid"])
-                await run(self.coordinator.db.delete_game, self._username, game["bgg_id"])
-            else:
-                flags = await web.set_status(
-                    game["collid"], game["bgg_id"], game.get("status") or {}, target
-                )
-                await run(self.coordinator.db.update_status, self._username, game["bgg_id"], flags)
-        except BggAuthError as err:
-            self._web_client = None
-            raise HomeAssistantError(str(err)) from err
-        except BggError as err:
-            raise HomeAssistantError(f"Änderung auf BGG fehlgeschlagen: {err}") from err
-        await self.coordinator.async_refresh_local()
-        return {"game": game["name"], "status": target}
 
     async def async_assign_scanned_tag(self, game: dict[str, Any]) -> str:
         if self._last_tag is None or dt_util.utcnow() - self._last_tag[1] > TAG_MAX_AGE:
