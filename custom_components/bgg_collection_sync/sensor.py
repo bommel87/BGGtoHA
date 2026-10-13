@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
 )
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -70,7 +70,30 @@ SENSORS = (
 async def async_setup_entry(
     hass: HomeAssistant, entry: BggConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    async_add_entities(BggSensor(entry.runtime_data, desc) for desc in SENSORS)
+    coordinator = entry.runtime_data
+    async_add_entities(BggSensor(coordinator, desc) for desc in SENSORS)
+
+    # Je Mitspieler ein Sensor; neue Mitspieler kommen nach Sync/Anlegen dazu
+    known: set[str] = set()
+
+    @callback
+    def _add_players() -> None:
+        new = [p for p in coordinator.data.get("players", []) if p["key"] not in known]
+        if new:
+            known.update(p["key"] for p in new)
+            async_add_entities(BggPlayerSensor(coordinator, p) for p in new)
+
+    _add_players()
+    entry.async_on_unload(coordinator.async_add_listener(_add_players))
+
+
+def _device_info(username: str) -> DeviceInfo:
+    return DeviceInfo(
+        identifiers={(DOMAIN, username.lower())},
+        name=f"BoardGameGeek {username}",
+        entry_type=DeviceEntryType.SERVICE,
+        configuration_url=f"https://boardgamegeek.com/collection/user/{username}",
+    )
 
 
 class BggSensor(CoordinatorEntity[BggCoordinator], SensorEntity):
@@ -86,12 +109,7 @@ class BggSensor(CoordinatorEntity[BggCoordinator], SensorEntity):
         self.entity_description = description
         username = coordinator.client.username
         self._attr_unique_id = f"{username.lower()}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, username.lower())},
-            name=f"BoardGameGeek {username}",
-            entry_type=DeviceEntryType.SERVICE,
-            configuration_url=f"https://boardgamegeek.com/collection/user/{username}",
-        )
+        self._attr_device_info = _device_info(username)
 
     @property
     def native_value(self) -> Any:
@@ -144,3 +162,52 @@ class BggSensor(CoordinatorEntity[BggCoordinator], SensorEntity):
         if key == "suggestion":
             return {k: v for k, v in self.coordinator.manager.suggestion.items() if k != "phase"}
         return None
+
+
+class BggPlayerSensor(CoordinatorEntity[BggCoordinator], SensorEntity):
+    """Ein Mitspieler; Zustand = gemeinsame Partien."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "player"
+    _attr_icon = "mdi:account"
+
+    def __init__(self, coordinator: BggCoordinator, player: dict[str, Any]) -> None:
+        super().__init__(coordinator)
+        self._key = player["key"]
+        username = coordinator.client.username
+        self._attr_unique_id = f"{username.lower()}_player_{self._key}"
+        self._attr_device_info = _device_info(username)
+        self._attr_translation_placeholders = {"name": player["name"]}
+
+    @property
+    def _player(self) -> dict[str, Any] | None:
+        return next(
+            (p for p in self.coordinator.data.get("players", []) if p["key"] == self._key), None
+        )
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._player is not None
+
+    @property
+    def native_value(self) -> int | None:
+        player = self._player
+        return player["plays"] if player else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        p = self._player
+        if p is None:
+            return None
+        return {
+            "name": p["name"],
+            "bgg_username": p["bgg_username"],
+            "bgg_profile": (
+                f"https://boardgamegeek.com/user/{p['bgg_username']}" if p["bgg_username"] else None
+            ),
+            "wins": p["wins"],
+            "win_rate": p["win_rate"],
+            "last_played": p["last_played"],
+            "top_games": p["top_games"],
+            "manual": p["manual"],
+        }
