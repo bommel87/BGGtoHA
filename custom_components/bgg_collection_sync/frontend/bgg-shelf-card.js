@@ -17,6 +17,10 @@
  *
  * Status (Im Besitz / Zu verkaufen / Früher besessen) kommt aus dem BGG-Sync.
  * Ändern: Link "Auf BGG ändern" öffnet das Spiel auf BGG; der nächste Sync gleicht ab.
+ *
+ * BGG Play Card – laufende Partie mit Mitspielern, Gewinner, Beenden / Verwerfen:
+ *   type: custom:bgg-play-card
+ *   entity: sensor.xyz_spielsitzung   # optional, wird sonst automatisch gefunden
  */
 const DOMAIN = "bgg_collection_sync";
 const NO_LOCATION = "\u0000none";
@@ -43,6 +47,80 @@ function parseLocation(raw) {
   return { shelf: shelf || "Regal", fach: fach && fach > 0 ? fach : null };
 }
 
+// ---- Mitspieler (gemeinsam für Regal- und Partie-Karte) -------------------
+const isBgg = (hass, id, key) => {
+  const e = hass.entities?.[id];
+  return !!e && e.platform === DOMAIN && e.translation_key === key;
+};
+
+function bggPlayers(hass) {
+  return Object.values(hass.states)
+    .filter((s) => isBgg(hass, s.entity_id, "player") || ("win_rate" in (s.attributes || {}) && "top_games" in s.attributes))
+    .filter((s) => s.attributes.name && s.state !== "unavailable")
+    .map((s) => ({ name: s.attributes.name, plays: Number(s.state) || 0, bgg: s.attributes.bgg_username }))
+    .sort((a, b) => b.plays - a.plays || naturalSort(a.name, b.name));
+}
+
+function bggSession(hass, entityId) {
+  if (entityId) return hass.states[entityId];
+  return Object.values(hass.states).find(
+    (s) => isBgg(hass, s.entity_id, "session") || (s.entity_id.startsWith("sensor.") && "bgg_user" in (s.attributes || {}))
+  );
+}
+
+const playerChip = (name, on, bgg) =>
+  `<button class="pchip${on ? " on" : ""}" data-player="${esc(name)}" aria-pressed="${on}"
+     title="${bgg ? `BGG: ${esc(bgg)}` : "ohne BGG-Account"}">${esc(name)}${bgg ? `<i>BGG</i>` : ""}</button>`;
+
+function pickerHtml(players, selected) {
+  const known = new Set(players.map((p) => p.name.toLowerCase()));
+  const extra = [...selected].filter((n) => !known.has(n.toLowerCase()));
+  return `<div class="picker">
+    ${players.map((p) => playerChip(p.name, selected.has(p.name), p.bgg)).join("")}
+    ${extra.map((n) => playerChip(n, true, null)).join("")}
+    <input class="padd" placeholder="+ Name" aria-label="Mitspieler hinzufügen" enterkeyhint="done">
+  </div>`;
+}
+
+/** Chips direkt im DOM umschalten (kein Neuzeichnen -> Eingaben bleiben erhalten). */
+function bindPicker(root, selected, onChange) {
+  const bind = (b) =>
+    b.addEventListener("click", () => {
+      const n = b.dataset.player;
+      selected.has(n) ? selected.delete(n) : selected.add(n);
+      b.classList.toggle("on", selected.has(n));
+      b.setAttribute("aria-pressed", selected.has(n));
+      onChange?.();
+    });
+  root.querySelectorAll("[data-player]").forEach(bind);
+  const input = root.querySelector(".padd");
+  input?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const n = input.value.trim();
+    input.value = "";
+    if (!n || [...selected].some((x) => x.toLowerCase() === n.toLowerCase())) return;
+    const existing = [...root.querySelectorAll("[data-player]")].find(
+      (b) => b.dataset.player.toLowerCase() === n.toLowerCase()
+    );
+    if (existing) return existing.click();
+    selected.add(n);
+    input.insertAdjacentHTML("beforebegin", playerChip(n, true, null));
+    bind(input.previousElementSibling);
+    onChange?.();
+  });
+}
+
+const PICKER_STYLE = `
+.picker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pchip { all: unset; box-sizing: border-box; cursor: pointer; padding: 5px 12px; border-radius: 16px; font-size: .9em;
+  border: 1px solid var(--divider-color, #ccc); color: var(--primary-text-color); display: inline-flex; gap: 6px; align-items: center; }
+.pchip i { font-style: normal; font-size: .7em; opacity: .7; }
+.pchip.on { background: var(--primary-color, #03a9f4); border-color: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
+.pchip:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 2px; }
+.padd { flex: 0 1 110px; min-width: 80px; padding: 5px 10px; border-radius: 16px; font: inherit; font-size: .9em;
+  border: 1px dashed var(--divider-color, #ccc); background: none; color: var(--primary-text-color); }
+`;
+
 class BggShelfCard extends HTMLElement {
   constructor() {
     super();
@@ -53,6 +131,7 @@ class BggShelfCard extends HTMLElement {
     this._error = null;
     this._loading = false;
     this._stamp = null;
+    this._picked = new Set();
   }
 
   static getStubConfig() {
@@ -248,6 +327,7 @@ class BggShelfCard extends HTMLElement {
           <datalist id="bgg-shelves">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
           <label>Fach <input id="fach" type="number" min="1" max="20" value="${fach ?? ""}"></label>
         </div>
+        ${current === "prev_owned" ? "" : `<h3>Mitspieler</h3>${pickerHtml(bggPlayers(this._hass), this._picked)}`}
         <div class="actions">
           <button id="save">Standort speichern</button>
           ${current === "prev_owned" ? "" : `<button id="play" class="primary">Partie starten</button>`}
@@ -328,6 +408,7 @@ class BggShelfCard extends HTMLElement {
       b.addEventListener("click", () => {
         this._selected = Number(b.dataset.id);
         this._msg = "";
+        this._picked = new Set();
         this._render();
       })
     );
@@ -339,9 +420,12 @@ class BggShelfCard extends HTMLElement {
       })
     );
     root.getElementById("save")?.addEventListener("click", () => this._save());
-    root.getElementById("play")?.addEventListener("click", () =>
-      this._call("start_play", { bgg_id: this._selected }, "Partie gestartet")
-    );
+    if (this._selected != null) bindPicker(root.querySelector(".dialog"), this._picked);
+    root.getElementById("play")?.addEventListener("click", () => {
+      const data = { bgg_id: this._selected };
+      if (this._picked.size) data.player_names = [...this._picked];
+      this._call("start_play", data, "Partie gestartet");
+    });
   }
 }
 
@@ -420,7 +504,186 @@ ul { margin: 0; padding-left: 18px; font-size: .9em; }
 .bgg-link:hover, .bgg-link:focus-visible { text-decoration: underline; }
 .hint { font-size: .8em; color: var(--secondary-text-color); margin: 6px 0 0; }
 .msg { min-height: 1em; font-size: .9em; color: var(--secondary-text-color); margin: 10px 0 0; }
-`;
+${PICKER_STYLE}`;
+
+// ---- Partie-Karte -----------------------------------------------------------
+class BggPlayCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._stamp = null;
+    this._playKey = null;
+    this._picked = new Set();
+    this._winner = "";
+    this._note = "";
+    this._msg = "";
+    this._busy = false;
+  }
+
+  static getStubConfig() {
+    return {};
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    this._stamp = null;
+    if (this._hass) this.hass = this._hass;
+  }
+
+  getCardSize() {
+    return 4;
+  }
+
+  getGridOptions() {
+    return { columns: "full", min_columns: 6 };
+  }
+
+  connectedCallback() {
+    this._timer = setInterval(() => this._tick(), 30000);
+  }
+
+  disconnectedCallback() {
+    clearInterval(this._timer);
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._config) return;
+    const s = bggSession(hass, this._config.entity);
+    const players = bggPlayers(hass);
+    const stamp = `${s?.last_updated}|${players.map((p) => p.name + p.plays).join(",")}`;
+    if (stamp === this._stamp) return;
+    this._stamp = stamp;
+    // Neue Partie -> Auswahl aus dem Start übernehmen
+    const key = s?.state === "running" ? s.attributes.started_at : null;
+    if (key !== this._playKey) {
+      this._playKey = key;
+      this._picked = new Set(s?.attributes?.player_names || []);
+      this._winner = "";
+      this._note = "";
+      this._msg = "";
+    }
+    this._session = s;
+    this._players = players;
+    this._render();
+  }
+
+  _minutes() {
+    const start = Date.parse(this._session?.attributes?.started_at);
+    return Number.isNaN(start) ? null : Math.max(0, Math.round((Date.now() - start) / 60000));
+  }
+
+  _tick() {
+    const el = this.shadowRoot.getElementById("mins");
+    const m = this._minutes();
+    if (el && m != null) el.textContent = `${m} Min.`;
+  }
+
+  _winnerOptions() {
+    const me = this._session?.attributes?.bgg_user;
+    const names = [...this._picked];
+    if (this._winner && this._winner !== me && !names.includes(this._winner)) this._winner = "";
+    const opt = (v, label) => `<option value="${esc(v)}"${v === this._winner ? " selected" : ""}>${esc(label)}</option>`;
+    return [opt("", "— kein Gewinner —"), me ? opt(me, `Ich (${me})`) : "", ...names.map((n) => opt(n, n))].join("");
+  }
+
+  _render() {
+    const s = this._session;
+    let body;
+    if (!s) {
+      body = `<p class="empty">Sitzungs-Sensor der BGG-Integration nicht gefunden.</p>`;
+    } else if (s.state !== "running") {
+      body = `<p class="empty">Keine laufende Partie. Starte eine im Regal.</p>`;
+    } else {
+      const a = s.attributes;
+      const start = new Date(a.started_at);
+      const time = Number.isNaN(start.getTime())
+        ? ""
+        : start.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      body = `
+        <div class="head">
+          <div>
+            <h2>🎲 ${esc(a.name)}</h2>
+            <p>seit ${time} Uhr · <span id="mins">${this._minutes() ?? "?"} Min.</span>${a.location ? ` · ${esc(a.location)}` : ""}</p>
+          </div>
+        </div>
+        <h3>Mitspieler</h3>
+        ${pickerHtml(this._players, this._picked)}
+        <div class="row">
+          <label>Gewinner <select id="winner">${this._winnerOptions()}</select></label>
+          <label class="grow">Notiz <input id="note" value="${esc(this._note)}" placeholder="optional"></label>
+        </div>
+        <div class="actions">
+          <button id="end" class="primary"${this._busy ? " disabled" : ""}>Beenden</button>
+          <button id="cancel"${this._busy ? " disabled" : ""}>Verwerfen</button>
+        </div>
+        <p class="msg" id="msg">${esc(this._msg)}</p>`;
+    }
+    this.shadowRoot.innerHTML = `<style>${PLAY_STYLE}</style><ha-card>${body}</ha-card>`;
+    const root = this.shadowRoot;
+    if (!s || s.state !== "running") return;
+    const winner = root.getElementById("winner");
+    bindPicker(root, this._picked, () => (winner.innerHTML = this._winnerOptions()));
+    winner.addEventListener("change", (e) => (this._winner = e.target.value));
+    root.getElementById("note").addEventListener("input", (e) => (this._note = e.target.value));
+    root.getElementById("end").addEventListener("click", () => this._end());
+    root.getElementById("cancel").addEventListener("click", () => {
+      if (confirm("Partie wirklich verwerfen? Sie wird nicht gespeichert.")) this._run("cancel_play", {});
+    });
+  }
+
+  _end() {
+    const data = { player_names: [...this._picked] };
+    if (this._winner) data.winner = this._winner;
+    if (this._note.trim()) data.note = this._note.trim();
+    this._run("end_play", data);
+  }
+
+  async _run(service, data) {
+    this._busy = true;
+    this._msg = "";
+    try {
+      const res = await this._hass.callWS({
+        type: "call_service",
+        domain: DOMAIN,
+        service,
+        service_data: data,
+        return_response: service === "end_play",
+      });
+      const r = res?.response;
+      this._msg = r?.bgg_error
+        ? `Gespeichert, aber nicht auf BGG geloggt: ${r.bgg_error}`
+        : service === "end_play"
+          ? `Gespeichert${r?.bgg_play_id != null ? " und auf BGG geloggt" : ""}.`
+          : "Verworfen.";
+    } catch (err) {
+      this._msg = err?.message || String(err);
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+}
+
+const PLAY_STYLE = `
+ha-card { padding: 16px; }
+h2 { font-size: 1.25em; font-weight: 500; margin: 0 0 2px; }
+.head p { margin: 0; color: var(--secondary-text-color); font-size: .9em; }
+h3 { font-size: .85em; text-transform: uppercase; letter-spacing: .04em; color: var(--secondary-text-color); margin: 14px 0 6px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; align-items: flex-end; }
+.row label { display: flex; flex-direction: column; gap: 4px; font-size: .85em; color: var(--secondary-text-color); min-width: 0; }
+.row .grow { flex: 1 1 180px; }
+select, #note { padding: 8px; border-radius: 6px; font: inherit; font-size: 1rem; border: 1px solid var(--divider-color, #ccc);
+  background: var(--card-background-color, #fff); color: var(--primary-text-color); min-width: 0; }
+.actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.actions button { all: unset; cursor: pointer; padding: 8px 16px; border-radius: 8px;
+  border: 1px solid var(--primary-color, #03a9f4); color: var(--primary-color, #03a9f4); }
+.actions .primary { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
+.actions button[disabled] { opacity: .5; cursor: default; }
+.actions button:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 2px; }
+.empty { color: var(--secondary-text-color); margin: 0; }
+.msg { min-height: 1em; font-size: .9em; color: var(--secondary-text-color); margin: 10px 0 0; }
+${PICKER_STYLE}`;
 
 if (!customElements.get("bgg-shelf-card")) {
   customElements.define("bgg-shelf-card", BggShelfCard);
@@ -429,5 +692,14 @@ if (!customElements.get("bgg-shelf-card")) {
     type: "bgg-shelf-card",
     name: "BGG Spieleregal",
     description: "Zeigt die BGG-Sammlung als Billy-Regale anhand der Standorte.",
+  });
+}
+if (!customElements.get("bgg-play-card")) {
+  customElements.define("bgg-play-card", BggPlayCard);
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "bgg-play-card",
+    name: "BGG Partie",
+    description: "Laufende Partie mit Mitspielern, Gewinner, Beenden und Verwerfen.",
   });
 }
