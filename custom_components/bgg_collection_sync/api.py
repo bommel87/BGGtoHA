@@ -394,6 +394,25 @@ def _is_cloudflare(resp: aiohttp.ClientResponse, text: str) -> bool:
     )
 
 
+def _parse_set_cookies(values: list[str]) -> dict[str, str]:
+    """Set-Cookie-Header -> {Name: Wert}; gelöschte Cookies fallen weg.
+
+    Bewusst ohne http.cookies: dessen strenger Parser verwirft bei ungewöhnlichen
+    Werten/Attributen den ganzen Header (dann fehlt die BGG-Sitzung).
+    """
+    cookies: dict[str, str] = {}
+    for raw in values:
+        name, sep, value = raw.split(";", 1)[0].strip().partition("=")
+        if not sep or not name:
+            continue
+        attrs = raw.lower()
+        if value in ("", "deleted") or "max-age=0" in attrs or "expires=thu, 01-jan-1970" in attrs:
+            cookies.pop(name, None)
+        else:
+            cookies[name] = value
+    return cookies
+
+
 class BggWebClient:
     """Loggt Partien über die BGG-Webseite (benötigt das BGG-Passwort)."""
 
@@ -402,33 +421,44 @@ class BggWebClient:
         self._username = username
         self._password = password
         self._logged_in = False
+        # Sitzungs-Cookies aus dem Login; werden zusätzlich zum Cookie-Jar explizit gesendet
+        self._cookies: dict[str, str] = {}
 
-    async def _request(self, url: str, payload: dict[str, Any]) -> tuple[int, str]:
+    async def _request(
+        self, url: str, payload: dict[str, Any]
+    ) -> tuple[int, str, list[str]]:
+        headers = {**WEB_HEADERS, "Origin": WEB_BASE, "Referer": f"{WEB_BASE}/"}
+        if self._cookies:
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
         try:
             async with self._session.post(
                 url,
                 json=payload,
-                headers={**WEB_HEADERS, "Origin": WEB_BASE, "Referer": f"{WEB_BASE}/"},
+                headers=headers,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 text = await resp.text()
                 if _is_cloudflare(resp, text):
                     _LOGGER.debug("Cloudflare-Block: HTTP %s %s", resp.status, text[:200])
                     raise BggError(CLOUDFLARE_MSG)
-                return resp.status, text
+                return resp.status, text, resp.headers.getall("Set-Cookie", [])
         except (aiohttp.ClientError, TimeoutError) as err:
             raise BggError(f"Verbindung zu BGG fehlgeschlagen: {err}") from err
 
     async def login(self) -> None:
-        status, text = await self._request(
+        self._cookies = {}
+        status, text, set_cookies = await self._request(
             f"{WEB_BASE}/login/api/v1",
             {"credentials": {"username": self._username, "password": self._password}},
         )
-        _LOGGER.debug("BGG-Login: HTTP %s", status)
+        self._cookies = _parse_set_cookies(set_cookies)
+        _LOGGER.debug("BGG-Login: HTTP %s, Cookies: %s", status, sorted(self._cookies))
         if status in (400, 401, 403):
             raise BggAuthError("BGG-Login fehlgeschlagen (Benutzername/Passwort prüfen)")
         if status >= 300:
             raise BggError(f"BGG-Login: HTTP {status}")
+        if not self._cookies:
+            raise BggAuthError("BGG-Login ohne Sitzung: BGG hat keine Cookies gesetzt")
         self._logged_in = True
 
     async def log_play(
@@ -454,7 +484,7 @@ class BggWebClient:
         for attempt in range(2):
             if not self._logged_in:
                 await self.login()
-            status, text = await self._request(f"{WEB_BASE}/geekplay.php", payload)
+            status, text, _ = await self._request(f"{WEB_BASE}/geekplay.php", payload)
             _LOGGER.debug("BGG geekplay: HTTP %s %s", status, text[:300])
             try:
                 data = json.loads(text)
@@ -466,7 +496,10 @@ class BggWebClient:
                 self._logged_in = False  # Session abgelaufen -> einmal neu anmelden
                 continue
             if needs_login:
-                raise BggAuthError("BGG hat die Partie abgelehnt (nicht angemeldet)")
+                raise BggAuthError(
+                    "BGG hat die Partie abgelehnt (nicht angemeldet). "
+                    f"Cookies vom Login: {', '.join(sorted(self._cookies)) or 'keine'}"
+                )
             if status != 200 or not isinstance(data, dict):
                 raise BggError(f"Unerwartete Antwort von BGG (HTTP {status})")
             if error:
