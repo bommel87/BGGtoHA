@@ -18,9 +18,11 @@
  * Status (Im Besitz / Zu verkaufen / Früher besessen) kommt aus dem BGG-Sync.
  * Ändern: Link "Auf BGG ändern" öffnet das Spiel auf BGG; der nächste Sync gleicht ab.
  *
- * BGG Play Card – laufende Partie mit Mitspielern, Gewinner, Beenden / Verwerfen:
+ * BGG Play Card – laufende Partie mit Mitspielern, Punkten, Gewinner, Beenden / Verwerfen;
+ * nach dem Beenden QR-Code / Link zum Import in BG Stats:
  *   type: custom:bgg-play-card
  *   entity: sensor.xyz_spielsitzung   # optional, wird sonst automatisch gefunden
+ *   bgstats: true                     # QR-Code für BG Stats anbieten (Standard: an)
  */
 const DOMAIN = "bgg_collection_sync";
 const NO_LOCATION = "\u0000none";
@@ -516,8 +518,10 @@ class BggPlayCard extends HTMLElement {
     this._picked = new Set();
     this._winner = "";
     this._note = "";
+    this._scores = {};
     this._msg = "";
     this._busy = false;
+    this._result = null;
   }
 
   static getStubConfig() {
@@ -525,7 +529,7 @@ class BggPlayCard extends HTMLElement {
   }
 
   setConfig(config) {
-    this._config = { ...config };
+    this._config = { bgstats: true, ...config };
     this._stamp = null;
     if (this._hass) this.hass = this._hass;
   }
@@ -561,7 +565,8 @@ class BggPlayCard extends HTMLElement {
       this._picked = new Set(s?.attributes?.player_names || []);
       this._winner = "";
       this._note = "";
-      this._msg = "";
+      this._scores = {};
+      if (key) this._msg = "";
     }
     this._session = s;
     this._players = players;
@@ -584,7 +589,38 @@ class BggPlayCard extends HTMLElement {
     const names = [...this._picked];
     if (this._winner && this._winner !== me && !names.includes(this._winner)) this._winner = "";
     const opt = (v, label) => `<option value="${esc(v)}"${v === this._winner ? " selected" : ""}>${esc(label)}</option>`;
-    return [opt("", "— kein Gewinner —"), me ? opt(me, `Ich (${me})`) : "", ...names.map((n) => opt(n, n))].join("");
+    return [opt("", "Automatisch (meiste Punkte)"), me ? opt(me, `Ich (${me})`) : "", ...names.map((n) => opt(n, n))].join("");
+  }
+
+  _scoreRows() {
+    const me = this._session?.attributes?.bgg_user;
+    const rows = [...(me ? [[me, `Ich (${me})`]] : []), ...[...this._picked].map((n) => [n, n])];
+    return rows
+      .map(
+        ([key, label]) => `<label class="score"><span>${esc(label)}</span>
+          <input type="number" inputmode="decimal" step="any" data-score="${esc(key)}" value="${esc(this._scores[key] ?? "")}" placeholder="–"></label>`
+      )
+      .join("");
+  }
+
+  _bindScores(root) {
+    root.querySelectorAll("[data-score]").forEach((el) =>
+      el.addEventListener("input", (e) => (this._scores[el.dataset.score] = e.target.value))
+    );
+  }
+
+  _resultHtml() {
+    const r = this._result;
+    if (!r) return "";
+    return `<div class="result">
+      <h3>In BG Stats übernehmen</h3>
+      <p class="hint">QR-Code mit dem Handy scannen oder Link öffnen – BG Stats zeigt dann den Import-Dialog.</p>
+      <div class="qr">${r.qr_svg}</div>
+      <div class="actions">
+        <a class="btn primary" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">In BG Stats öffnen</a>
+        <button id="done">Fertig</button>
+      </div>
+    </div>`;
   }
 
   _render() {
@@ -593,7 +629,11 @@ class BggPlayCard extends HTMLElement {
     if (!s) {
       body = `<p class="empty">Sitzungs-Sensor der BGG-Integration nicht gefunden.</p>`;
     } else if (s.state !== "running") {
-      body = `<p class="empty">Keine laufende Partie. Starte eine im Regal.</p>`;
+      body = this._result
+        ? ""
+        : `<p class="empty">Keine laufende Partie. Starte eine im Regal.</p>
+           ${this._config.bgstats ? `<div class="actions"><button id="last">Letzte Partie an BG Stats</button></div>` : ""}
+           <p class="msg" id="msg">${esc(this._msg)}</p>`;
     } else {
       const a = s.attributes;
       const start = new Date(a.started_at);
@@ -609,6 +649,8 @@ class BggPlayCard extends HTMLElement {
         </div>
         <h3>Mitspieler</h3>
         ${pickerHtml(this._players, this._picked)}
+        <h3>Punkte</h3>
+        <div class="scores" id="scores">${this._scoreRows()}</div>
         <div class="row">
           <label>Gewinner <select id="winner">${this._winnerOptions()}</select></label>
           <label class="grow">Notiz <input id="note" value="${esc(this._note)}" placeholder="optional"></label>
@@ -619,11 +661,22 @@ class BggPlayCard extends HTMLElement {
         </div>
         <p class="msg" id="msg">${esc(this._msg)}</p>`;
     }
-    this.shadowRoot.innerHTML = `<style>${PLAY_STYLE}</style><ha-card>${body}</ha-card>`;
+    this.shadowRoot.innerHTML = `<style>${PLAY_STYLE}</style><ha-card>${this._resultHtml()}${body}</ha-card>`;
     const root = this.shadowRoot;
+    root.getElementById("done")?.addEventListener("click", () => {
+      this._result = null;
+      this._render();
+    });
+    root.getElementById("last")?.addEventListener("click", () => this._bgstats(null));
     if (!s || s.state !== "running") return;
     const winner = root.getElementById("winner");
-    bindPicker(root, this._picked, () => (winner.innerHTML = this._winnerOptions()));
+    const scores = root.getElementById("scores");
+    this._bindScores(root);
+    bindPicker(root.querySelector(".picker"), this._picked, () => {
+      winner.innerHTML = this._winnerOptions();
+      scores.innerHTML = this._scoreRows();
+      this._bindScores(scores);
+    });
     winner.addEventListener("change", (e) => (this._winner = e.target.value));
     root.getElementById("note").addEventListener("input", (e) => (this._note = e.target.value));
     root.getElementById("end").addEventListener("click", () => this._end());
@@ -636,7 +689,31 @@ class BggPlayCard extends HTMLElement {
     const data = { player_names: [...this._picked] };
     if (this._winner) data.winner = this._winner;
     if (this._note.trim()) data.note = this._note.trim();
+    const me = this._session?.attributes?.bgg_user;
+    const keys = new Set([...(me ? [me] : []), ...this._picked]);
+    const scores = {};
+    for (const [k, v] of Object.entries(this._scores)) {
+      const n = parseFloat(String(v).replace(",", "."));
+      if (keys.has(k) && Number.isFinite(n)) scores[k] = n;
+    }
+    if (Object.keys(scores).length) data.scores = scores;
     this._run("end_play", data);
+  }
+
+  async _bgstats(playId) {
+    try {
+      const res = await this._hass.callWS({
+        type: "call_service",
+        domain: DOMAIN,
+        service: "bgstats_link",
+        service_data: playId ? { play_id: playId } : {},
+        return_response: true,
+      });
+      this._result = res.response;
+    } catch (err) {
+      this._msg = err?.message || String(err);
+    }
+    this._render();
   }
 
   async _run(service, data) {
@@ -654,8 +731,9 @@ class BggPlayCard extends HTMLElement {
       this._msg = r?.bgg_error
         ? `Gespeichert, aber nicht auf BGG geloggt: ${r.bgg_error}`
         : service === "end_play"
-          ? `Gespeichert${r?.bgg_play_id != null ? " und auf BGG geloggt" : ""}.`
+          ? `Gespeichert${r?.winner ? ` – gewonnen: ${r.winner}` : ""}${r?.bgg_play_id != null ? " · auf BGG geloggt" : ""}.`
           : "Verworfen.";
+      if (service === "end_play" && r?.play_id && this._config.bgstats) await this._bgstats(r.play_id);
     } catch (err) {
       this._msg = err?.message || String(err);
     } finally {
@@ -683,6 +761,18 @@ select, #note { padding: 8px; border-radius: 6px; font: inherit; font-size: 1rem
 .actions button:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 2px; }
 .empty { color: var(--secondary-text-color); margin: 0; }
 .msg { min-height: 1em; font-size: .9em; color: var(--secondary-text-color); margin: 10px 0 0; }
+.scores { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.score { display: flex; flex-direction: column; gap: 4px; font-size: .85em; color: var(--secondary-text-color); min-width: 0; }
+.score span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score input { padding: 8px; border-radius: 6px; font: inherit; font-size: 1rem; border: 1px solid var(--divider-color, #ccc);
+  background: var(--card-background-color, #fff); color: var(--primary-text-color); min-width: 0; width: 100%; box-sizing: border-box; }
+.result { margin-bottom: 12px; }
+.result h3 { margin-top: 0; }
+.hint { font-size: .85em; color: var(--secondary-text-color); margin: 0 0 10px; }
+.qr { background: #fff; padding: 8px; border-radius: 8px; width: min(260px, 100%); box-sizing: border-box; }
+.qr svg { display: block; width: 100%; height: auto; }
+.actions .btn { all: unset; cursor: pointer; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--primary-color, #03a9f4); }
+.actions .btn.primary { background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff); }
 ${PICKER_STYLE}`;
 
 if (!customElements.get("bgg-shelf-card")) {
