@@ -8,10 +8,20 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.components import persistent_notification
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_END_SCENE, CONF_MEDIA_PLAYER, DOMAIN
+from .api import BggAuthError, BggError, BggWebClient
+from .const import (
+    CONF_END_SCENE,
+    CONF_MEDIA_PLAYER,
+    CONF_PASSWORD,
+    CONF_UPLOAD_PLAYS,
+    DEFAULT_UPLOAD_PLAYS,
+    DOMAIN,
+)
 from .logic import filter_games, normalize_spotify, spotify_media_type, summary_line
 
 if TYPE_CHECKING:
@@ -35,6 +45,7 @@ class BggManager:
         self._last_tag: tuple[str, datetime] | None = None
         self._started_playback = False
         self._unsub = None
+        self._web_client: BggWebClient | None = None
 
     # ---- Lebenszyklus -----------------------------------------------------
     @callback
@@ -211,6 +222,7 @@ class BggManager:
         winner: str | None = None,
         note: str | None = None,
         players: int | None = None,
+        upload: bool | None = None,
     ) -> dict[str, Any]:
         active = self.coordinator.data["active_play"]
         if not active:
@@ -240,7 +252,8 @@ class BggManager:
                 "winner": winner,
             },
         )
-        return {"game": active["game_name"], "duration_min": duration, "players": players}
+        result = {"game": active["game_name"], "duration_min": duration, "players": players}
+        return {**result, **await self._maybe_upload(active["id"], upload)}
 
     async def _apply_end(self) -> None:
         scene = self._options.get(CONF_END_SCENE)
@@ -267,10 +280,11 @@ class BggManager:
         players: int | None,
         winner: str | None,
         note: str | None,
+        upload: bool | None = None,
     ) -> dict[str, Any]:
         start = played_at or dt_util.utcnow()
         end = start + timedelta(minutes=duration_min or 0)
-        await self.hass.async_add_executor_job(
+        play_id = await self.hass.async_add_executor_job(
             self.coordinator.db.add_play,
             self._username,
             game["bgg_id"],
@@ -283,7 +297,72 @@ class BggManager:
             note,
         )
         await self.coordinator.async_refresh_local()
-        return {"game": game["name"], "played_at": start.isoformat()}
+        result = {"game": game["name"], "played_at": start.isoformat()}
+        return {**result, **await self._maybe_upload(play_id, upload)}
+
+    # ---- Partien auf BGG loggen ------------------------------------------
+    def _web(self) -> BggWebClient:
+        password = self._options.get(CONF_PASSWORD)
+        if not password:
+            raise ServiceValidationError(
+                "Zum Loggen auf BGG das BGG-Passwort in den Optionen der Integration eintragen"
+            )
+        if self._web_client is None:
+            self._web_client = BggWebClient(
+                async_create_clientsession(self.hass), self._username, password
+            )
+        return self._web_client
+
+    async def async_upload_play(self, play_id: int) -> dict[str, Any]:
+        """Lädt eine lokal gespeicherte Partie auf BGG hoch."""
+        db = self.coordinator.db
+        play = await self.hass.async_add_executor_job(db.get_play, self._username, play_id)
+        if play is None:
+            raise ServiceValidationError(f"Partie {play_id} nicht gefunden")
+        if play["ended_at"] is None:
+            raise ServiceValidationError("Die Partie läuft noch")
+        if play["bgg_play_id"] is not None:
+            raise ServiceValidationError("Die Partie ist bereits auf BGG geloggt")
+        started = dt_util.parse_datetime(play["started_at"]) or dt_util.utcnow()
+        winner = (play["winner"] or "").strip()
+        web = self._web()
+        try:
+            bgg_play_id = await web.log_play(
+                play["bgg_id"],
+                dt_util.as_local(started).date().isoformat(),
+                play["duration_min"],
+                play["note"],
+                [{"name": winner, "win": 1}] if winner else None,
+            )
+        except BggAuthError as err:
+            self._web_client = None
+            raise HomeAssistantError(str(err)) from err
+        except BggError as err:
+            raise HomeAssistantError(f"Loggen auf BGG fehlgeschlagen: {err}") from err
+        # 0 = hochgeladen, aber BGG hat keine ID genannt (verhindert Doppel-Upload)
+        await self.hass.async_add_executor_job(db.set_bgg_play_id, play_id, bgg_play_id or 0)
+        return {"play_id": play_id, "bgg_play_id": bgg_play_id}
+
+    async def _maybe_upload(self, play_id: int, upload: bool | None) -> dict[str, Any]:
+        """Upload nach dem lokalen Speichern; Fehler verwerfen die Partie nicht."""
+        if upload is None:
+            upload = self._options.get(CONF_UPLOAD_PLAYS, DEFAULT_UPLOAD_PLAYS)
+        if not upload:
+            return {"play_id": play_id}
+        try:
+            return await self.async_upload_play(play_id)
+        except HomeAssistantError as err:
+            _LOGGER.warning("Partie %s nicht auf BGG geloggt: %s", play_id, err)
+            persistent_notification.async_create(
+                self.hass,
+                f"Die Partie wurde lokal gespeichert, aber nicht auf BGG geloggt: {err}
+
+"
+                f"Erneut versuchen mit `{DOMAIN}.upload_play` und `play_id: {play_id}`.",
+                title="BGG: Partie nicht hochgeladen",
+                notification_id=f"{DOMAIN}_upload_{play_id}",
+            )
+            return {"play_id": play_id, "bgg_error": str(err)}
 
     async def async_get_plays(self, bgg_id: int | None, limit: int) -> list[dict[str, Any]]:
         return await self.hass.async_add_executor_job(
