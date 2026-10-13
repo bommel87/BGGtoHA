@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bgregal-harness",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "C:\\Users\\susan\\AppData\\Local\\Temp\\claude\\C--Users-susan-Documents-BGGtoHA\\8a82af18-51d7-4ba2-b7c3-0f410469380c\\scratchpad\\harness"],
+      "port": 8765
+    }
+  ]
+}
