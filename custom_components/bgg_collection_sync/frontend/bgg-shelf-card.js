@@ -15,17 +15,12 @@
  *   shelves: [Regal 1, Regal 2]   # optional: Reihenfolge / leere Regale anzeigen
  *   show_expansions: false        # Erweiterungen mit eigenem Standort mit einsortieren
  *
- * Status (Klick auf ein Spiel): Im Besitz / Zu verkaufen / Früher besessen / Löschen
- * -> Dienst set_bgg_status, schreibt zu BGG zurück (BGG-Passwort in den Optionen nötig).
+ * Status (Im Besitz / Zu verkaufen / Früher besessen) kommt aus dem BGG-Sync.
+ * Ändern: Link "Auf BGG ändern" öffnet das Spiel auf BGG; der nächste Sync gleicht ab.
  */
 const DOMAIN = "bgg_collection_sync";
 const NO_LOCATION = "\u0000none";
-const STATUSES = [
-  ["owned", "Im Besitz"],
-  ["for_sale", "Zu verkaufen"],
-  ["prev_owned", "Früher besessen"],
-  ["delete", "Löschen"],
-];
+const STATUS_LABELS = { owned: "Im Besitz", for_sale: "Zu verkaufen", prev_owned: "Früher besessen" };
 const statusOf = (g) => (g.prev_owned && !g.owned ? "prev_owned" : g.for_trade ? "for_sale" : "owned");
 
 const esc = (s) =>
@@ -232,14 +227,7 @@ class BggShelfCard extends HTMLElement {
     ].filter(Boolean);
     const exp = (g.expansions || []).map((e) => `<li>${esc(e.name)}</li>`).join("");
     const current = statusOf(g);
-    const statusButtons = STATUSES.map(([key, label]) => {
-      if (key === "delete" && this._confirmDelete)
-        return `<button class="st danger confirm" data-status="delete">Wirklich von BGG löschen?</button>`;
-      const on = key === current ? " on" : "";
-      const danger = key === "delete" ? " danger" : "";
-      return `<button class="st${on}${danger}" data-status="${key}" aria-pressed="${key === current}"
-        ${this._busy ? "disabled" : ""}>${label}</button>`;
-    }).join("");
+    const bggUrl = `https://boardgamegeek.com/boardgame/${encodeURIComponent(g.bgg_id)}`;
     return `<div class="overlay" data-close>
       <div class="dialog" role="dialog" aria-label="${esc(g.name)}">
         <button class="x" data-close aria-label="Schließen">×</button>
@@ -249,7 +237,11 @@ class BggShelfCard extends HTMLElement {
         </div>
         ${exp ? `<h3>Erweiterungen</h3><ul>${exp}</ul>` : ""}
         <h3>Status bei BGG</h3>
-        <div class="status">${statusButtons}</div>
+        <div class="status">
+          <span class="chip ${current}">${STATUS_LABELS[current]}</span>
+          <a class="bgg-link" href="${bggUrl}" target="_blank" rel="noopener noreferrer">Auf BGG ändern ↗</a>
+        </div>
+        <p class="hint">Änderungen auf BGG erscheinen hier nach dem nächsten Sync.</p>
         <h3>Standort</h3>
         <div class="loc">
           <input list="bgg-shelves" id="shelf" placeholder="Regal" value="${shelf === NO_LOCATION ? "" : esc(shelf)}">
@@ -271,28 +263,6 @@ class BggShelfCard extends HTMLElement {
     const fach = root.getElementById("fach").value.trim();
     const location = shelf ? (fach ? `${shelf}, Fach ${fach}` : shelf) : fach ? `Regal, Fach ${fach}` : "";
     await this._call("set_game_meta", { bgg_id: this._selected, location }, "Gespeichert");
-  }
-
-  async _setStatus(target) {
-    if (target === "delete" && !this._confirmDelete) {
-      this._confirmDelete = true;
-      this._render();
-      return;
-    }
-    this._confirmDelete = false;
-    this._busy = true;
-    this._msg = "Wird zu BGG übertragen …";
-    this._render();
-    const label = STATUSES.find(([k]) => k === target)[1];
-    try {
-      await this._hass.callService(DOMAIN, "set_bgg_status", { bgg_id: this._selected, status: target });
-      this._msg = target === "delete" ? "Von BGG gelöscht" : `Auf BGG gespeichert: ${label}`;
-      if (target === "delete") this._selected = null;
-    } catch (err) {
-      this._msg = err?.message || String(err);
-    }
-    this._busy = false;
-    this._render();
   }
 
   async _call(service, data, okMsg) {
@@ -358,7 +328,6 @@ class BggShelfCard extends HTMLElement {
       b.addEventListener("click", () => {
         this._selected = Number(b.dataset.id);
         this._msg = "";
-        this._confirmDelete = false;
         this._render();
       })
     );
@@ -366,12 +335,8 @@ class BggShelfCard extends HTMLElement {
       el.addEventListener("click", (e) => {
         if (e.target !== el) return;
         this._selected = null;
-        this._confirmDelete = false;
         this._render();
       })
-    );
-    root.querySelectorAll(".st").forEach((b) =>
-      b.addEventListener("click", () => this._setStatus(b.dataset.status))
     );
     root.getElementById("save")?.addEventListener("click", () => this._save());
     root.getElementById("play")?.addEventListener("click", () =>
@@ -446,15 +411,14 @@ ul { margin: 0; padding-left: 18px; font-size: .9em; }
 .box.gone { filter: grayscale(.85); opacity: .75; }
 .sale-area header::before { content: "€ "; color: #b8860b; }
 .gone-area .floor { opacity: .9; }
-.status { display: flex; flex-wrap: wrap; gap: 6px; }
-.st { all: unset; cursor: pointer; padding: 6px 12px; border-radius: 16px; font-size: .9em;
-  border: 1px solid var(--divider-color, #ccc); color: var(--primary-text-color); }
-.st.on { background: var(--primary-color, #03a9f4); border-color: var(--primary-color, #03a9f4);
-  color: var(--text-primary-color, #fff); }
-.st.danger { color: var(--error-color, #c00); border-color: var(--error-color, #c00); }
-.st.danger.confirm { background: var(--error-color, #c00); color: #fff; }
-.st:focus-visible { outline: 2px solid var(--primary-color, #03a9f4); outline-offset: 2px; }
-.st[disabled] { opacity: .5; cursor: default; }
+.status { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.chip { padding: 4px 10px; border-radius: 12px; font-size: .85em;
+  background: var(--secondary-background-color, #eee); color: var(--primary-text-color); }
+.chip.for_sale { background: #ffd54f; color: #4a3b00; }
+.chip.prev_owned { opacity: .75; }
+.bgg-link { color: var(--primary-color, #03a9f4); text-decoration: none; font-weight: 500; }
+.bgg-link:hover, .bgg-link:focus-visible { text-decoration: underline; }
+.hint { font-size: .8em; color: var(--secondary-text-color); margin: 6px 0 0; }
 .msg { min-height: 1em; font-size: .9em; color: var(--secondary-text-color); margin: 10px 0 0; }
 `;
 
