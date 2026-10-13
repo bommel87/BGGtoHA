@@ -52,7 +52,6 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.client = client
         self.db = db
         self.manager = BggManager(hass, self)
-        self._full_play_sync = True  # beim ersten Sync nach dem Start alles abgleichen
 
     # ---- lokaler Zustand --------------------------------------------------
     def _load_local(self) -> tuple[Any, ...]:
@@ -129,6 +128,16 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._sync_bgg_plays(full)
         except BggAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
+        await self.async_refresh_local()
+
+    async def async_background_play_sync(self) -> None:
+        """Vollständiger Abgleich nach dem Start; kann bei vielen Partien dauern."""
+        try:
+            await asyncio.sleep(PAUSE_BETWEEN_REQUESTS)
+            await self._sync_bgg_plays(full=True)
+        except BggError as err:
+            _LOGGER.warning("Partien/Mitspieler konnten nicht geladen werden: %s", err)
+            return
         await self.async_refresh_local()
 
     # ---- BGG-Sync ---------------------------------------------------------
@@ -210,15 +219,17 @@ class BggCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             await run(self.db.replace_games, self.client.username, rows, synced_at.isoformat())
 
-            # Mitspieler aus BGG-Partien; Fehler hier blockieren den Sammlungs-Sync nicht
-            await asyncio.sleep(PAUSE_BETWEEN_REQUESTS)
-            try:
-                await self._sync_bgg_plays(self._full_play_sync)
-                self._full_play_sync = False
-            except BggAuthError:
-                raise
-            except BggError as err:
-                _LOGGER.warning("Partien/Mitspieler konnten nicht geladen werden: %s", err)
+            # Mitspieler aus BGG-Partien (neue seit dem letzten Sync). Beim Start läuft
+            # stattdessen ein vollständiger Abgleich im Hintergrund (async_background_play_sync).
+            # Fehler hier blockieren den Sammlungs-Sync nicht.
+            if self.data is not None:
+                await asyncio.sleep(PAUSE_BETWEEN_REQUESTS)
+                try:
+                    await self._sync_bgg_plays(full=False)
+                except BggAuthError:
+                    raise
+                except BggError as err:
+                    _LOGGER.warning("Partien/Mitspieler konnten nicht geladen werden: %s", err)
             local = await run(self._load_local)
         except BggAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err

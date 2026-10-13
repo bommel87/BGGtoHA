@@ -351,6 +351,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: BggConfigEntry) -> bool:
     entry.async_on_unload(coordinator.manager.async_stop)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_create_background_task(
+        hass, coordinator.async_background_play_sync(), f"{DOMAIN}_play_sync"
+    )
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
