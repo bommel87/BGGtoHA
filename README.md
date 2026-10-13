@@ -70,7 +70,18 @@ und `top_games` dazu.
 - **Beim Spielen:** `end_play` und `log_play` haben das Feld `player_names` (Namen oder BGG-Benutzernamen, ohne dich).
   Bekannte Mitspieler werden beim Upload mit ihrem BGG-Account geloggt, die Partie erscheint dann auch bei ihnen.
   Du wirst automatisch als Spieler ergänzt. `winner` kann einer der Mitspieler oder dein BGG-Name sein.
-  `players` wird aus der Liste berechnet, wenn es nicht angegeben ist.
+  `players` wird aus der Liste berechnet, wenn es nicht angegeben ist. Auch `start_play` nimmt `player_names` an.
+  `end_play` übernimmt diese Mitspieler, wenn du beim Beenden keine anderen angibst.
+
+### Partie-Kachel
+```yaml
+type: custom:bgg-play-card
+```
+Die Kachel zeigt die laufende Partie mit Laufzeit. Mitspieler wählst du per Antippen aus, neue Namen kommen über
+„+ Name“ dazu. Außerdem gibt es eine Auswahl für den Gewinner, ein Notizfeld und die Knöpfe **Beenden** und
+**Verwerfen**. Die Mitspieler aus dem Start sind vorausgewählt. Im Fenster eines Spiels in der Regalkarte wählst du
+die Mitspieler schon vor **Partie starten** aus. Soll die Kachel nur bei laufender Partie erscheinen, packst du sie
+in eine `conditional`-Karte mit `state: running` auf dem Sitzungs-Sensor.
 
 ## Spielvorschlag
 `suggest_game` (`players`, `mode` any/cooperative/competitive, `game_type`
