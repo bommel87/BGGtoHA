@@ -177,24 +177,3 @@ reject_suggestion:
 accept_suggestion:
 
 reset_suggestion:
-
-set_bgg_status:
-  fields:
-    entry_id:
-      selector:
-        config_entry:
-          integration: bgg_collection_sync
-    bgg_id:
-      selector:
-        number:
-          min: 1
-          max: 9999999
-          mode: box
-    name:
-      selector:
-        text:
-    status:
-      required: true
-      selector:
-        select:
-          options: [owned, for_sale, prev_owned, delete]

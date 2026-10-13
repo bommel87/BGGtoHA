@@ -306,30 +306,6 @@ class BggDatabase:
                 (*[v or None for v in fields.values()], username, bgg_id),
             )
 
-    # ---- BGG-Status (nach erfolgreichem Zurückschreiben) ------------------
-    def update_status(self, username: str, bgg_id: int, flags: dict[str, str]) -> None:
-        with closing(self._connect()) as con, con:
-            con.execute(
-                "UPDATE games SET owned = ?, prev_owned = ?, for_trade = ?, wishlist = ?, "
-                "want_to_play = ?, status = ? WHERE username = ? AND bgg_id = ?",
-                (
-                    int(flags.get("own") == "1"),
-                    int(flags.get("prevowned") == "1"),
-                    int(flags.get("fortrade") == "1"),
-                    int(flags.get("wishlist") == "1"),
-                    int(flags.get("wanttoplay") == "1"),
-                    json.dumps(flags),
-                    username,
-                    bgg_id,
-                ),
-            )
-
-    def delete_game(self, username: str, bgg_id: int) -> None:
-        with closing(self._connect()) as con, con:
-            con.execute(
-                "DELETE FROM games WHERE username = ? AND bgg_id = ?", (username, bgg_id)
-            )
-
     # ---- Partien ----------------------------------------------------------
     def start_play(
         self, username: str, bgg_id: int, name: str, players: int | None, started_at: str
