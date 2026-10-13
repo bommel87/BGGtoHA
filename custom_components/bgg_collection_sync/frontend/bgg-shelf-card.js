@@ -330,8 +330,23 @@ class BggShelfCard extends HTMLElement {
           <label>Fach <input id="fach" type="number" min="1" max="20" value="${fach ?? ""}"></label>
         </div>
         ${current === "prev_owned" ? "" : `<h3>Mitspieler</h3>${pickerHtml(bggPlayers(this._hass), this._picked)}`}
+        <h3>Zuordnungen</h3>
+        <div class="meta">
+          <label>NFC-Tag
+            <span class="with-btn">
+              <input id="nfc" value="${esc(g.nfc_tag)}" placeholder="Tag-ID">
+              <button id="scan" title="Zuletzt gescannten Tag (letzte 10 Min.) übernehmen">Gescannten übernehmen</button>
+            </span>
+          </label>
+          <label>Spotify-Playlist
+            <input id="spotify" value="${esc(g.spotify_uri)}" placeholder="Link oder spotify:playlist:…">
+          </label>
+          <label>Lichtprofil
+            <select id="light">${this._lightOptions(g.light_scene)}</select>
+          </label>
+        </div>
         <div class="actions">
-          <button id="save">Standort speichern</button>
+          <button id="save">Speichern</button>
           ${current === "prev_owned" ? "" : `<button id="play" class="primary">Partie starten</button>`}
         </div>
         <p class="msg" id="msg">${esc(this._msg || "")}</p>
@@ -339,12 +354,51 @@ class BggShelfCard extends HTMLElement {
     </div>`;
   }
 
+  _lightOptions(current) {
+    const list = Object.values(this._hass?.states || {})
+      .filter((st) => st.entity_id.startsWith("scene.") || st.entity_id.startsWith("script."))
+      .map((st) => [st.entity_id, st.attributes.friendly_name || st.entity_id])
+      .sort((a, b) => naturalSort(a[1], b[1]));
+    if (current && !list.some(([id]) => id === current)) list.unshift([current, `${current} (nicht gefunden)`]);
+    const opt = (id, label) => `<option value="${esc(id)}"${id === (current || "") ? " selected" : ""}>${esc(label)}</option>`;
+    return [opt("", "— keins —"), ...list.map(([id, label]) => opt(id, label))].join("");
+  }
+
   async _save() {
     const root = this.shadowRoot;
     const shelf = root.getElementById("shelf").value.trim();
     const fach = root.getElementById("fach").value.trim();
     const location = shelf ? (fach ? `${shelf}, Fach ${fach}` : shelf) : fach ? `Regal, Fach ${fach}` : "";
-    await this._call("set_game_meta", { bgg_id: this._selected, location }, "Gespeichert");
+    await this._call(
+      "set_game_meta",
+      {
+        bgg_id: this._selected,
+        location,
+        nfc_tag: root.getElementById("nfc").value.trim(),
+        spotify_uri: root.getElementById("spotify").value.trim(),
+        light_scene: root.getElementById("light").value,
+      },
+      "Gespeichert"
+    );
+  }
+
+  async _scan() {
+    try {
+      const res = await this._hass.callWS({
+        type: "call_service",
+        domain: DOMAIN,
+        service: "assign_scanned_tag",
+        service_data: { bgg_id: this._selected },
+        return_response: true,
+      });
+      const input = this.shadowRoot.getElementById("nfc");
+      if (input) input.value = res.response?.nfc_tag || "";
+      this._msg = "Tag zugeordnet";
+    } catch (err) {
+      this._msg = err?.message || String(err);
+    }
+    const msg = this.shadowRoot.getElementById("msg");
+    if (msg) msg.textContent = this._msg;
   }
 
   async _call(service, data, okMsg) {
@@ -422,6 +476,7 @@ class BggShelfCard extends HTMLElement {
       })
     );
     root.getElementById("save")?.addEventListener("click", () => this._save());
+    root.getElementById("scan")?.addEventListener("click", () => this._scan());
     if (this._selected != null) bindPicker(root.querySelector(".dialog"), this._picked);
     root.getElementById("play")?.addEventListener("click", () => {
       const data = { bgg_id: this._selected };
@@ -487,6 +542,14 @@ ul { margin: 0; padding-left: 18px; font-size: .9em; }
   background: var(--card-background-color, #fff); color: var(--primary-text-color); }
 #shelf { flex: 1 1 160px; min-width: 0; }
 #fach { width: 64px; margin-left: 4px; }
+.meta { display: flex; flex-direction: column; gap: 10px; }
+.meta label { display: flex; flex-direction: column; gap: 4px; font-size: .85em; color: var(--secondary-text-color); }
+.meta input, .meta select { padding: 8px; border-radius: 6px; font: inherit; font-size: 1rem; min-width: 0;
+  border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: var(--primary-text-color); }
+.with-btn { display: flex; gap: 8px; }
+.with-btn input { flex: 1 1 auto; }
+.with-btn button { all: unset; cursor: pointer; padding: 6px 10px; border-radius: 6px; font-size: .9em; white-space: nowrap;
+  border: 1px solid var(--primary-color, #03a9f4); color: var(--primary-color, #03a9f4); }
 .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 .actions button { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 8px;
   border: 1px solid var(--primary-color, #03a9f4); color: var(--primary-color, #03a9f4); }
