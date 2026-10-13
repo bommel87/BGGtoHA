@@ -54,6 +54,24 @@ wegen Cloudflare oder eines falschen Passworts, bleibt die Partie lokal erhalten
 Benachrichtigung. Erneut versuchen mit `bgg_collection_sync.upload_play` und `play_id` (Feld `id` aus `get_plays`).
 Bereits hochgeladene Partien haben eine `bgg_play_id` und werden nicht doppelt geloggt.
 
+## Mitspieler
+Für jeden Mitspieler gibt es einen Sensor `sensor.<gerät>_mitspieler_<name>`. Sein Zustand ist die Zahl der
+gemeinsamen Partien. Als Attribute kommen `bgg_username`, `bgg_profile`, `wins`, `win_rate` (in %), `last_played`
+und `top_games` dazu.
+
+- **Aus BGG:** Die Integration lädt deine auf BGG geloggten Partien und liest die Mitspieler aus. Nach dem Start
+  gleicht sie alle Partien im Hintergrund ab, bei jedem Sync danach nur die neuen. Ein vollständiger Abgleich geht
+  jederzeit mit `sync_players`. Spieler mit BGG-Account werden über den Account zusammengeführt, auch wenn ihr Name
+  unterschiedlich geschrieben ist. Du selbst tauchst nicht auf.
+- **Selbst anlegen und verknüpfen:** `set_player` mit `name` und optional `bgg_username` (wird bei BGG geprüft).
+  Damit legst du neue Mitspieler an oder verknüpfst einen reinen Namen aus deinen BGG-Partien, zum Beispiel „Ben“,
+  mit dessen BGG-Account. `bgg_username` leer lassen löst die Verknüpfung. `remove_player` entfernt einen selbst
+  angelegten Eintrag. `get_players` liefert alle Mitspieler.
+- **Beim Spielen:** `end_play` und `log_play` haben das Feld `player_names` (Namen oder BGG-Benutzernamen, ohne dich).
+  Bekannte Mitspieler werden beim Upload mit ihrem BGG-Account geloggt, die Partie erscheint dann auch bei ihnen.
+  Du wirst automatisch als Spieler ergänzt. `winner` kann einer der Mitspieler oder dein BGG-Name sein.
+  `players` wird aus der Liste berechnet, wenn es nicht angegeben ist.
+
 ## Spielvorschlag
 `suggest_game` (`players`, `mode` any/cooperative/competitive, `game_type`
 any/family/strategy/party/abstract/thematic/wargame/children, `max_playtime`) mischt passende Spiele aus deinem
