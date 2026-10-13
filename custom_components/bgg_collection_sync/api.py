@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
+from yarl import URL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -325,6 +326,22 @@ STATUS_TARGETS = {
 }
 
 
+# Cloudflare vor BGG blockt unbekannte Programme -> wie ein Browser auftreten
+WEB_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+}
+CLOUDFLARE_MSG = "Cloudflare (Schutz vor BGG) hat die Anfrage blockiert – später erneut versuchen"
+
+
+def _is_cloudflare(status: int, text: str) -> bool:
+    return status in (403, 503) and "cloudflare" in text.lower()
+
+
 class BggWebClient:
     """Ändert die Sammlung über die BGG-Webseite (benötigt das BGG-Passwort)."""
 
@@ -339,15 +356,21 @@ class BggWebClient:
             async with self._session.post(
                 f"{WEB_BASE}/login/api/v1",
                 json={"credentials": {"username": self._username, "password": self._password}},
-                headers={"User-Agent": USER_AGENT},
+                headers=WEB_HEADERS,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
+                text = await resp.text()
+                _LOGGER.debug("BGG-Login: HTTP %s %s", resp.status, text[:200])
+                if _is_cloudflare(resp.status, text):
+                    raise BggError(CLOUDFLARE_MSG)
                 if resp.status in (400, 401, 403):
                     raise BggAuthError("BGG-Login fehlgeschlagen (Benutzername/Passwort prüfen)")
                 if resp.status >= 300:
                     raise BggError(f"BGG-Login: HTTP {resp.status}")
         except (aiohttp.ClientError, TimeoutError) as err:
             raise BggError(f"Verbindung zu BGG fehlgeschlagen: {err}") from err
+        if not self._session.cookie_jar.filter_cookies(URL(WEB_BASE)):
+            raise BggAuthError("BGG-Login ohne Sitzung (Benutzername/Passwort prüfen)")
         self._logged_in = True
 
     async def _post(self, data: dict[str, str]) -> None:
@@ -358,16 +381,22 @@ class BggWebClient:
                 async with self._session.post(
                     f"{WEB_BASE}/geekcollection.php",
                     data=data,
-                    headers={"User-Agent": USER_AGENT},
+                    headers={
+                        **WEB_HEADERS,
+                        "Origin": WEB_BASE,
+                        "Referer": f"{WEB_BASE}/collection/user/{self._username}",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:
                     text = await resp.text()
                     status = resp.status
             except (aiohttp.ClientError, TimeoutError) as err:
                 raise BggError(f"Verbindung zu BGG fehlgeschlagen: {err}") from err
-            needs_login = status in (401, 403) or "must login" in text.lower() or (
-                "login" in text.lower() and "error" in text.lower() and len(text) < 500
-            )
+            _LOGGER.debug("BGG %s: HTTP %s %s", data.get("action"), status, text[:300])
+            if _is_cloudflare(status, text):
+                raise BggError(CLOUDFLARE_MSG)
+            needs_login = status in (401, 403) or "must login" in text.lower()
             if needs_login and attempt == 0:
                 self._logged_in = False  # Session abgelaufen -> einmal neu anmelden
                 continue
@@ -376,7 +405,6 @@ class BggWebClient:
             if status != 200:
                 raise BggError(f"BGG antwortete mit HTTP {status}")
             return
-
     async def set_status(
         self, collid: int, bgg_id: int, current: dict[str, str], target: str
     ) -> dict[str, str]:
