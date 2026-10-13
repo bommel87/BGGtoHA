@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import Counter
 from contextlib import closing
 from typing import Any
 
-from .api import VersionInfo
+from .api import BggPlay, VersionInfo
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -87,7 +88,37 @@ CREATE TABLE IF NOT EXISTS plays (
     winner       TEXT,
     note         TEXT,
     source       TEXT    NOT NULL DEFAULT 'session',
-    bgg_play_id  INTEGER
+    bgg_play_id  INTEGER,
+    player_names TEXT
+);
+-- Von BGG geladene Partien (Quelle für Mitspieler-Statistik)
+CREATE TABLE IF NOT EXISTS bgg_plays (
+    username   TEXT    NOT NULL,
+    play_id    INTEGER NOT NULL,
+    date       TEXT,
+    bgg_id     INTEGER,
+    game_name  TEXT,
+    quantity   INTEGER NOT NULL DEFAULT 1,
+    length     INTEGER,
+    PRIMARY KEY (username, play_id)
+);
+CREATE TABLE IF NOT EXISTS bgg_play_players (
+    username     TEXT    NOT NULL,
+    play_id      INTEGER NOT NULL,
+    pos          INTEGER NOT NULL,
+    name         TEXT,
+    bgg_username TEXT,
+    bgg_userid   INTEGER,
+    win          INTEGER NOT NULL DEFAULT 0,
+    score        TEXT,
+    PRIMARY KEY (username, play_id, pos)
+);
+-- Eigene Mitspieler-Einträge / Verknüpfung Name -> BGG-Account (überleben jeden Sync)
+CREATE TABLE IF NOT EXISTS players (
+    username     TEXT NOT NULL,
+    name         TEXT NOT NULL COLLATE NOCASE,
+    bgg_username TEXT,
+    PRIMARY KEY (username, name)
 );
 CREATE INDEX IF NOT EXISTS idx_games_language ON games (username, version_language);
 CREATE INDEX IF NOT EXISTS idx_plays_game ON plays (username, bgg_id);
@@ -101,11 +132,26 @@ def _split(value: str | None) -> list[str]:
     return [x for x in (value or "").split(SEP) if x]
 
 
-def _loads(value: str | None) -> list[str]:
+def _dumps(value: list | None) -> str | None:
+    return json.dumps(value, ensure_ascii=False) if value else None
+
+
+def _loads(value: str | None) -> list:
     try:
         return json.loads(value) if value else []
     except ValueError:
         return []
+
+
+def _play(row: sqlite3.Row) -> dict[str, Any]:
+    play = dict(row)
+    play["player_names"] = _loads(play.get("player_names"))
+    return play
+
+
+def _key(name: str | None, bgg_username: str | None) -> str:
+    """Identität eines Mitspielers: BGG-Account, sonst Name."""
+    return f"u:{bgg_username.lower()}" if bgg_username else f"n:{(name or '').lower()}"
 
 
 class BggDatabase:
@@ -138,6 +184,8 @@ class BggDatabase:
             play_cols = {r["name"] for r in con.execute("PRAGMA table_info(plays)")}
             if "bgg_play_id" not in play_cols:  # Migration von 0.5.x
                 con.execute("ALTER TABLE plays ADD COLUMN bgg_play_id INTEGER")
+            if "player_names" not in play_cols:  # Migration von 0.6.x
+                con.execute("ALTER TABLE plays ADD COLUMN player_names TEXT")
 
     # ---- Sync-Cache -------------------------------------------------------
     def known_version_ids(self) -> set[int]:
@@ -339,12 +387,13 @@ class BggDatabase:
         players: int | None,
         winner: str | None,
         note: str | None,
+        player_names: list[dict[str, Any]] | None = None,
     ) -> None:
         with closing(self._connect()) as con, con:
             con.execute(
                 "UPDATE plays SET ended_at = ?, duration_min = ?, players = ?, winner = ?, "
-                "note = ? WHERE id = ?",
-                (ended_at, duration_min, players, winner, note, play_id),
+                "note = ?, player_names = ? WHERE id = ?",
+                (ended_at, duration_min, players, winner, note, _dumps(player_names), play_id),
             )
 
     def cancel_play(self, play_id: int) -> None:
@@ -362,13 +411,15 @@ class BggDatabase:
         players: int | None,
         winner: str | None,
         note: str | None,
+        player_names: list[dict[str, Any]] | None = None,
     ) -> int:
         with closing(self._connect()) as con, con:
             cur = con.execute(
                 "INSERT INTO plays (username, bgg_id, game_name, started_at, ended_at, "
-                "duration_min, players, winner, note, source) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')",
-                (username, bgg_id, name, started_at, ended_at, duration_min, players, winner, note),
+                "duration_min, players, winner, note, source, player_names) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)",
+                (username, bgg_id, name, started_at, ended_at, duration_min, players, winner,
+                 note, _dumps(player_names)),
             )
             return cur.lastrowid
 
@@ -377,7 +428,7 @@ class BggDatabase:
             row = con.execute(
                 "SELECT * FROM plays WHERE username = ? AND id = ?", (username, play_id)
             ).fetchone()
-        return dict(row) if row else None
+        return _play(row) if row else None
 
     def set_bgg_play_id(self, play_id: int, bgg_play_id: int | None) -> None:
         with closing(self._connect()) as con, con:
@@ -394,7 +445,7 @@ class BggDatabase:
         sql += " ORDER BY started_at DESC, id DESC LIMIT ?"
         args.append(limit)
         with closing(self._connect()) as con:
-            return [dict(r) for r in con.execute(sql, args).fetchall()]
+            return [_play(r) for r in con.execute(sql, args).fetchall()]
 
     def count_plays(self, username: str) -> int:
         with closing(self._connect()) as con:
@@ -402,3 +453,143 @@ class BggDatabase:
                 "SELECT COUNT(*) FROM plays WHERE username = ? AND ended_at IS NOT NULL",
                 (username,),
             ).fetchone()[0]
+
+    # ---- Mitspieler -------------------------------------------------------
+    def known_bgg_play_ids(self, username: str) -> set[int]:
+        with closing(self._connect()) as con:
+            return {
+                r[0]
+                for r in con.execute("SELECT play_id FROM bgg_plays WHERE username = ?", (username,))
+            }
+
+    def save_bgg_plays(self, username: str, plays: list[BggPlay]) -> None:
+        with closing(self._connect()) as con, con:
+            for p in plays:
+                con.execute(
+                    "INSERT OR REPLACE INTO bgg_plays (username, play_id, date, bgg_id, "
+                    "game_name, quantity, length) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (username, p.play_id, p.date, p.bgg_id, p.game_name, p.quantity, p.length),
+                )
+                con.execute(
+                    "DELETE FROM bgg_play_players WHERE username = ? AND play_id = ?",
+                    (username, p.play_id),
+                )
+                con.executemany(
+                    "INSERT INTO bgg_play_players (username, play_id, pos, name, bgg_username, "
+                    "bgg_userid, win, score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (username, p.play_id, i, pl.name, pl.bgg_username, pl.bgg_userid,
+                         int(pl.win), pl.score)
+                        for i, pl in enumerate(p.players)
+                    ],
+                )
+
+    def set_player(self, username: str, name: str, bgg_username: str | None) -> None:
+        with closing(self._connect()) as con, con:
+            con.execute(
+                "INSERT INTO players (username, name, bgg_username) VALUES (?, ?, ?) "
+                "ON CONFLICT (username, name) DO UPDATE SET bgg_username = excluded.bgg_username",
+                (username, name, bgg_username),
+            )
+
+    def remove_player(self, username: str, name: str) -> bool:
+        with closing(self._connect()) as con, con:
+            cur = con.execute(
+                "DELETE FROM players WHERE username = ? AND name = ?", (username, name)
+            )
+            return cur.rowcount > 0
+
+    def get_players(self, username: str) -> list[dict[str, Any]]:
+        """Alle Mitspieler (ohne dich selbst) mit Statistik aus BGG- und lokalen Partien."""
+        with closing(self._connect()) as con:
+            manual = con.execute(
+                "SELECT name, bgg_username FROM players WHERE username = ?", (username,)
+            ).fetchall()
+            bgg_rows = con.execute(
+                """SELECT p.play_id, p.date, p.game_name, pp.name, pp.bgg_username,
+                          pp.bgg_userid, pp.win
+                   FROM bgg_play_players pp
+                   JOIN bgg_plays p ON p.username = pp.username AND p.play_id = pp.play_id
+                   WHERE pp.username = ?
+                   ORDER BY p.date""",
+                (username,),
+            ).fetchall()
+            # Lokale Partien, die (noch) nicht auf BGG sind
+            local_rows = con.execute(
+                "SELECT id, started_at, game_name, player_names FROM plays "
+                "WHERE username = ? AND ended_at IS NOT NULL AND bgg_play_id IS NULL "
+                "AND player_names IS NOT NULL",
+                (username,),
+            ).fetchall()
+
+        me = username.lower()
+        # Name -> BGG-Account aus eigenen Einträgen (verknüpft auch reine Namen aus BGG-Partien)
+        links = {r["name"].lower(): r["bgg_username"] for r in manual if r["bgg_username"]}
+        players: dict[str, dict[str, Any]] = {}
+
+        def entry(name: str | None, bgg_username: str | None) -> dict[str, Any] | None:
+            bgg_username = bgg_username or links.get((name or "").lower())
+            if bgg_username and bgg_username.lower() == me:
+                return None
+            key = _key(name, bgg_username)
+            if key == "n:":
+                return None
+            return players.setdefault(
+                key,
+                {
+                    "key": key,
+                    "name": name or bgg_username,
+                    "bgg_username": bgg_username,
+                    "bgg_userid": None,
+                    "manual": False,
+                    "plays": set(),
+                    "wins": 0,
+                    "last_played": None,
+                    "games": Counter(),
+                },
+            )
+
+        def count(p: dict[str, Any], play_key: str, date: str | None, game: str, win: bool) -> None:
+            if play_key in p["plays"]:
+                return
+            p["plays"].add(play_key)
+            p["wins"] += int(win)
+            p["games"][game] += 1
+            if date and (p["last_played"] is None or date >= p["last_played"]):
+                p["last_played"] = date
+
+        # nach Datum sortiert -> der zuletzt verwendete Name bleibt stehen
+        for r in bgg_rows:
+            p = entry(r["name"], r["bgg_username"])
+            if p is None:
+                continue
+            p["bgg_userid"] = p["bgg_userid"] or r["bgg_userid"]
+            if r["name"]:
+                p["name"] = r["name"]
+            count(p, f"b{r['play_id']}", r["date"], r["game_name"] or "", bool(r["win"]))
+        for r in local_rows:
+            date = (r["started_at"] or "")[:10] or None
+            for pl in _loads(r["player_names"]):
+                p = entry(pl.get("name"), pl.get("bgg_username"))
+                if p is not None:
+                    count(p, f"l{r['id']}", date, r["game_name"], bool(pl.get("win")))
+        for r in manual:  # eigene Einträge: Name hat Vorrang, auch ohne Partien
+            p = entry(r["name"], r["bgg_username"])
+            if p is not None:
+                p["name"] = r["name"]
+                p["manual"] = True
+
+        result = []
+        for p in players.values():
+            plays = len(p.pop("plays"))
+            games = p.pop("games")
+            result.append(
+                {
+                    **p,
+                    "plays": plays,
+                    "win_rate": round(p["wins"] / plays * 100) if plays else None,
+                    "top_games": [g for g, _ in games.most_common(5) if g],
+                }
+            )
+        result.sort(key=lambda p: (-p["plays"], p["name"].lower()))
+        return result
