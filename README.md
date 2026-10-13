@@ -55,10 +55,8 @@ den BGG-Subdomains bzw. Kategorien. Spiele ohne diese Daten werden bei gesetztem
 (idle/suggested/accepted/none, Attribute: name, location, summary …), `Letzte Synchronisierung`.
 
 ## Virtuelles Billy-Regal (Dashboard-Karte)
-Ab 0.4.0 bringt die Integration die Karte `bgg-shelf-card` mit. Sie wird automatisch als Dashboard-Ressource
-eingetragen (*Einstellungen → Dashboards → Ressourcen*), damit sie auch in der Companion-App lädt. Nach Updates
-ändert sich die Adresse automatisch, ein Cache-Leeren ist nicht nötig. Dashboards im YAML-Modus: Ressource
-`/bgg_collection_sync/bgg-shelf-card.js` (JavaScript-Modul) selbst eintragen.
+Ab 0.4.0 bringt die Integration die Karte `bgg-shelf-card` mit. Sie wird automatisch geladen, eine Ressource muss
+nicht angelegt werden (nach dem Update einmal den Browser-Cache leeren bzw. die App neu laden).
 Dashboard bearbeiten → *Karte hinzufügen* → *BGG Spieleregal*, oder per YAML:
 ```yaml
 type: custom:bgg-shelf-card
