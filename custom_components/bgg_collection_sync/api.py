@@ -17,6 +17,7 @@ USER_AGENT = "HomeAssistant-bgg-collection-sync/0.1.0"
 MAX_ATTEMPTS = 8
 RETRY_DELAY = 5  # Sekunden (BGG antwortet bei Collections zuerst oft mit 202)
 THING_BATCH_SIZE = 20  # BGG erlaubt max. 20 IDs pro /thing-Abfrage
+PLAYS_PAGE_SIZE = 100  # BGG liefert 100 Partien pro Seite
 EXPANSION = "boardgameexpansion"
 
 # BGG-Subdomains (Rank-Namen) -> interner Spieletyp
@@ -109,6 +110,30 @@ def _to_float(value) -> float | None:
 
 
 @dataclass
+class PlayPlayer:
+    """Ein Mitspieler einer BGG-Partie."""
+
+    name: str
+    bgg_username: str | None
+    bgg_userid: int | None
+    win: bool
+    score: str | None
+
+
+@dataclass
+class BggPlay:
+    """Eine auf BGG geloggte Partie."""
+
+    play_id: int
+    date: str | None
+    bgg_id: int | None
+    game_name: str
+    quantity: int
+    length: int | None
+    players: list[PlayPlayer]
+
+
+@dataclass
 class ThingData:
     """Ergebnis einer /thing-Abfrage."""
 
@@ -168,6 +193,43 @@ class BggClient:
         root = await self._get("user", {"name": self.username})
         if not root.get("id"):
             raise BggNotFoundError(self.username)
+
+    async def fetch_plays(self, page: int = 1) -> tuple[int, list[BggPlay]]:
+        """Eine Seite der geloggten Partien (neueste zuerst); liefert (Gesamtzahl, Partien)."""
+        root = await self._get("plays", {"username": self.username, "page": page})
+        plays = []
+        for el in root.findall("play"):
+            play_id = _to_int(el.get("id"))
+            if play_id is None:
+                continue
+            item = el.find("item")
+            players = [
+                PlayPlayer(
+                    name=(p.get("name") or "").strip(),
+                    bgg_username=(p.get("username") or "").strip() or None,
+                    bgg_userid=_to_int(p.get("userid")) or None,
+                    win=p.get("win") == "1",
+                    score=(p.get("score") or "").strip() or None,
+                )
+                for p in el.findall("players/player")
+            ]
+            plays.append(
+                BggPlay(
+                    play_id=play_id,
+                    date=el.get("date"),
+                    bgg_id=_to_int(item.get("objectid")) if item is not None else None,
+                    game_name=item.get("name", "") if item is not None else "",
+                    quantity=_to_int(el.get("quantity")) or 1,
+                    length=_to_int(el.get("length")) or None,
+                    players=[p for p in players if p.name or p.bgg_username],
+                )
+            )
+        return _to_int(root.get("total")) or 0, plays
+
+    async def user_exists(self, username: str) -> bool:
+        """Prüft, ob es den BGG-Benutzer gibt."""
+        root = await self._get("user", {"name": username})
+        return bool(root.get("id"))
 
     async def fetch_collection(
         self, only_owned: bool, expansions: bool = False
