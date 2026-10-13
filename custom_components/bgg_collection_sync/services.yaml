@@ -92,6 +92,11 @@ end_play:
     upload_to_bgg:
       selector:
         boolean:
+    player_names:
+      example: "Anna, Ben"
+      selector:
+        text:
+          multiple: true
 
 cancel_play:
 
@@ -132,6 +137,11 @@ log_play:
     upload_to_bgg:
       selector:
         boolean:
+    player_names:
+      example: "Anna, Ben"
+      selector:
+        text:
+          multiple: true
 
 upload_play:
   fields:
@@ -142,6 +152,46 @@ upload_play:
           min: 1
           max: 99999999
           mode: box
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync
+
+sync_players:
+  fields:
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync
+
+set_player:
+  fields:
+    name:
+      required: true
+      example: "Anna"
+      selector:
+        text:
+    bgg_username:
+      selector:
+        text:
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync
+
+remove_player:
+  fields:
+    name:
+      required: true
+      selector:
+        text:
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync
+
+get_players:
+  fields:
     entry_id:
       selector:
         config_entry:

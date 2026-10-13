@@ -60,6 +60,9 @@
       },
       "suggestion": {
         "name": "Suggestion"
+      },
+      "player": {
+        "name": "Player {name}"
       }
     }
   },
@@ -167,6 +170,10 @@
         "upload_to_bgg": {
           "name": "Log on BGG",
           "description": "Also log the play on BGG (default: setting in the options). Requires the BGG password."
+        },
+        "player_names": {
+          "name": "Players",
+          "description": "Names or BGG usernames of the other players (without you). Known players are logged with their BGG account."
         }
       }
     },
@@ -209,6 +216,10 @@
         "upload_to_bgg": {
           "name": "Log on BGG",
           "description": "Also log the play on BGG (default: setting in the options). Requires the BGG password."
+        },
+        "player_names": {
+          "name": "Players",
+          "description": "Names or BGG usernames of the other players (without you). Known players are logged with their BGG account."
         }
       }
     },
@@ -220,6 +231,58 @@
           "name": "Play ID",
           "description": "Local ID of the play (field id from get_plays)."
         },
+        "entry_id": {
+          "name": "Entry",
+          "description": "Only use this BGG account."
+        }
+      }
+    },
+    "sync_players": {
+      "name": "Sync players",
+      "description": "Loads all your plays from BGG and updates the players.",
+      "fields": {
+        "entry_id": {
+          "name": "Entry",
+          "description": "Only use this BGG account."
+        }
+      }
+    },
+    "set_player": {
+      "name": "Add / link player",
+      "description": "Adds a player or links them to a BGG account. Also applies to players with the same name in your BGG plays.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Player name as used in plays."
+        },
+        "bgg_username": {
+          "name": "BGG username",
+          "description": "BGG account of the player. Empty = unlink."
+        },
+        "entry_id": {
+          "name": "Entry",
+          "description": "Only use this BGG account."
+        }
+      }
+    },
+    "remove_player": {
+      "name": "Remove player",
+      "description": "Removes a manually added player or their link.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Player name."
+        },
+        "entry_id": {
+          "name": "Entry",
+          "description": "Only use this BGG account."
+        }
+      }
+    },
+    "get_players": {
+      "name": "Get players",
+      "description": "Returns all players with plays, wins and BGG account.",
+      "fields": {
         "entry_id": {
           "name": "Entry",
           "description": "Only use this BGG account."

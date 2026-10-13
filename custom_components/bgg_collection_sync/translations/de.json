@@ -60,6 +60,9 @@
       },
       "suggestion": {
         "name": "Vorschlag"
+      },
+      "player": {
+        "name": "Mitspieler {name}"
       }
     }
   },
@@ -167,6 +170,10 @@
         "upload_to_bgg": {
           "name": "Auf BGG loggen",
           "description": "Partie zusätzlich auf BGG loggen (Standard: Einstellung in den Optionen). Braucht das BGG-Passwort."
+        },
+        "player_names": {
+          "name": "Mitspieler",
+          "description": "Namen oder BGG-Benutzernamen der Mitspielenden (ohne dich). Bekannte Mitspieler werden mit ihrem BGG-Account geloggt."
         }
       }
     },
@@ -209,6 +216,10 @@
         "upload_to_bgg": {
           "name": "Auf BGG loggen",
           "description": "Partie zusätzlich auf BGG loggen (Standard: Einstellung in den Optionen). Braucht das BGG-Passwort."
+        },
+        "player_names": {
+          "name": "Mitspieler",
+          "description": "Namen oder BGG-Benutzernamen der Mitspielenden (ohne dich). Bekannte Mitspieler werden mit ihrem BGG-Account geloggt."
         }
       }
     },
@@ -220,6 +231,58 @@
           "name": "Partie-ID",
           "description": "Lokale ID der Partie (Feld id aus get_plays)."
         },
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account verwenden."
+        }
+      }
+    },
+    "sync_players": {
+      "name": "Mitspieler synchronisieren",
+      "description": "Lädt alle deine Partien von BGG und aktualisiert die Mitspieler.",
+      "fields": {
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account verwenden."
+        }
+      }
+    },
+    "set_player": {
+      "name": "Mitspieler anlegen / verknüpfen",
+      "description": "Legt einen Mitspieler an oder verknüpft ihn mit einem BGG-Account. Gilt auch für gleichnamige Spieler aus deinen BGG-Partien.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name des Mitspielers, wie er in Partien steht."
+        },
+        "bgg_username": {
+          "name": "BGG-Benutzername",
+          "description": "BGG-Account des Mitspielers. Leer = Verknüpfung lösen."
+        },
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account verwenden."
+        }
+      }
+    },
+    "remove_player": {
+      "name": "Mitspieler entfernen",
+      "description": "Entfernt einen selbst angelegten Mitspieler bzw. dessen Verknüpfung.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name des Mitspielers."
+        },
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account verwenden."
+        }
+      }
+    },
+    "get_players": {
+      "name": "Mitspieler abrufen",
+      "description": "Liefert alle Mitspieler mit Partien, Siegen und BGG-Account.",
+      "fields": {
         "entry_id": {
           "name": "Eintrag",
           "description": "Nur diesen BGG-Account verwenden."
