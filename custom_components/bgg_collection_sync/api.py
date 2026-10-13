@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -309,3 +310,104 @@ class BggClient:
                     )
                 )
         return ThingData(versions=versions, base_links=base_links, info=info)
+
+
+# ---- Partien auf BGG loggen (inoffizielle Website-Schnittstelle) ---------
+# Die XML API kann nur lesen. Partien speichert die BGG-Webseite über
+# geekplay.php – dafür ist ein Login mit Benutzername + Passwort nötig.
+WEB_BASE = "https://boardgamegeek.com"
+WEB_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "application/json, text/plain, */*",
+}
+CLOUDFLARE_MSG = "Cloudflare (Schutz vor BGG) hat die Anfrage blockiert – später erneut versuchen"
+
+
+def _is_cloudflare(resp: aiohttp.ClientResponse, text: str) -> bool:
+    if resp.headers.get("cf-mitigated"):
+        return True
+    lowered = text[:2000].lower()
+    return resp.status in (403, 429, 503) and (
+        "cloudflare" in lowered or "just a moment" in lowered
+    )
+
+
+class BggWebClient:
+    """Loggt Partien über die BGG-Webseite (benötigt das BGG-Passwort)."""
+
+    def __init__(self, session: aiohttp.ClientSession, username: str, password: str) -> None:
+        self._session = session  # eigene Session mit Cookie-Jar
+        self._username = username
+        self._password = password
+        self._logged_in = False
+
+    async def _request(self, url: str, payload: dict[str, Any]) -> tuple[int, str]:
+        try:
+            async with self._session.post(
+                url,
+                json=payload,
+                headers={**WEB_HEADERS, "Origin": WEB_BASE, "Referer": f"{WEB_BASE}/"},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                text = await resp.text()
+                if _is_cloudflare(resp, text):
+                    _LOGGER.debug("Cloudflare-Block: HTTP %s %s", resp.status, text[:200])
+                    raise BggError(CLOUDFLARE_MSG)
+                return resp.status, text
+        except (aiohttp.ClientError, TimeoutError) as err:
+            raise BggError(f"Verbindung zu BGG fehlgeschlagen: {err}") from err
+
+    async def login(self) -> None:
+        status, text = await self._request(
+            f"{WEB_BASE}/login/api/v1",
+            {"credentials": {"username": self._username, "password": self._password}},
+        )
+        _LOGGER.debug("BGG-Login: HTTP %s", status)
+        if status in (400, 401, 403):
+            raise BggAuthError("BGG-Login fehlgeschlagen (Benutzername/Passwort prüfen)")
+        if status >= 300:
+            raise BggError(f"BGG-Login: HTTP {status}")
+        self._logged_in = True
+
+    async def log_play(
+        self,
+        bgg_id: int,
+        playdate: str,
+        length_min: int | None = None,
+        comments: str | None = None,
+        players: list[dict[str, Any]] | None = None,
+    ) -> int | None:
+        """Speichert eine Partie auf BGG; liefert die BGG-Play-ID."""
+        payload: dict[str, Any] = {
+            "ajax": 1,
+            "action": "save",
+            "objecttype": "thing",
+            "objectid": bgg_id,
+            "playdate": playdate,
+            "quantity": 1,
+            "length": length_min or 0,
+            "comments": comments or "",
+            "players": players or [],
+        }
+        for attempt in range(2):
+            if not self._logged_in:
+                await self.login()
+            status, text = await self._request(f"{WEB_BASE}/geekplay.php", payload)
+            _LOGGER.debug("BGG geekplay: HTTP %s %s", status, text[:300])
+            try:
+                data = json.loads(text)
+            except ValueError:
+                data = None
+            error = str(data.get("error", "")) if isinstance(data, dict) else ""
+            needs_login = status in (401, 403) or "login" in error.lower()
+            if needs_login and attempt == 0:
+                self._logged_in = False  # Session abgelaufen -> einmal neu anmelden
+                continue
+            if needs_login:
+                raise BggAuthError("BGG hat die Partie abgelehnt (nicht angemeldet)")
+            if status != 200 or not isinstance(data, dict):
+                raise BggError(f"Unerwartete Antwort von BGG (HTTP {status})")
+            if error:
+                raise BggError(f"BGG: {error}")
+            return _to_int(data.get("playid"))
+        raise BggError("BGG-Upload fehlgeschlagen")

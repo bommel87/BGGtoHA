@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS plays (
     players      INTEGER,
     winner       TEXT,
     note         TEXT,
-    source       TEXT    NOT NULL DEFAULT 'session'
+    source       TEXT    NOT NULL DEFAULT 'session',
+    bgg_play_id  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_games_language ON games (username, version_language);
 CREATE INDEX IF NOT EXISTS idx_plays_game ON plays (username, bgg_id);
@@ -134,6 +135,9 @@ class BggDatabase:
             ):
                 if col not in cols:
                     con.execute(f"ALTER TABLE games ADD COLUMN {col} {decl}")
+            play_cols = {r["name"] for r in con.execute("PRAGMA table_info(plays)")}
+            if "bgg_play_id" not in play_cols:  # Migration von 0.5.x
+                con.execute("ALTER TABLE plays ADD COLUMN bgg_play_id INTEGER")
 
     # ---- Sync-Cache -------------------------------------------------------
     def known_version_ids(self) -> set[int]:
@@ -367,6 +371,17 @@ class BggDatabase:
                 (username, bgg_id, name, started_at, ended_at, duration_min, players, winner, note),
             )
             return cur.lastrowid
+
+    def get_play(self, username: str, play_id: int) -> dict[str, Any] | None:
+        with closing(self._connect()) as con:
+            row = con.execute(
+                "SELECT * FROM plays WHERE username = ? AND id = ?", (username, play_id)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_bgg_play_id(self, play_id: int, bgg_play_id: int | None) -> None:
+        with closing(self._connect()) as con, con:
+            con.execute("UPDATE plays SET bgg_play_id = ? WHERE id = ?", (bgg_play_id, play_id))
 
     def get_plays(
         self, username: str, bgg_id: int | None = None, limit: int = 50
