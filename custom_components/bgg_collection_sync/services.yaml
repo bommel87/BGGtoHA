@@ -89,6 +89,9 @@ end_play:
           min: 1
           max: 20
           mode: box
+    upload_to_bgg:
+      selector:
+        boolean:
 
 cancel_play:
 
@@ -126,6 +129,23 @@ log_play:
       selector:
         text:
           multiline: true
+    upload_to_bgg:
+      selector:
+        boolean:
+
+upload_play:
+  fields:
+    play_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 99999999
+          mode: box
+    entry_id:
+      selector:
+        config_entry:
+          integration: bgg_collection_sync
 
 get_plays:
   fields:

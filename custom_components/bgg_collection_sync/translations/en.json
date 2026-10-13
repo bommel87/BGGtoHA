@@ -34,7 +34,9 @@
           "only_owned": "Only sync owned games",
           "include_expansions": "Sync expansions and link them to base games",
           "media_player": "Media player for playlists",
-          "end_scene": "Scene/script at end of play"
+          "end_scene": "Scene/script at end of play",
+          "bgg_password": "BGG password (only for logging plays on BGG)",
+          "upload_plays": "Automatically log finished and manually added plays on BGG"
         }
       }
     }
@@ -161,6 +163,10 @@
         "players": {
           "name": "Players",
           "description": "Number of players."
+        },
+        "upload_to_bgg": {
+          "name": "Log on BGG",
+          "description": "Also log the play on BGG (default: setting in the options). Requires the BGG password."
         }
       }
     },
@@ -199,6 +205,24 @@
         "note": {
           "name": "Note",
           "description": "Free text about the play (optional)."
+        },
+        "upload_to_bgg": {
+          "name": "Log on BGG",
+          "description": "Also log the play on BGG (default: setting in the options). Requires the BGG password."
+        }
+      }
+    },
+    "upload_play": {
+      "name": "Log play on BGG",
+      "description": "Uploads a locally stored play to BGG, e.g. after a failed upload. Requires the BGG password in the options.",
+      "fields": {
+        "play_id": {
+          "name": "Play ID",
+          "description": "Local ID of the play (field id from get_plays)."
+        },
+        "entry_id": {
+          "name": "Entry",
+          "description": "Only use this BGG account."
         }
       }
     },

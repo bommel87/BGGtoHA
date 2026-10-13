@@ -355,9 +355,7 @@ class BggManager:
             _LOGGER.warning("Partie %s nicht auf BGG geloggt: %s", play_id, err)
             persistent_notification.async_create(
                 self.hass,
-                f"Die Partie wurde lokal gespeichert, aber nicht auf BGG geloggt: {err}
-
-"
+                f"Die Partie wurde lokal gespeichert, aber nicht auf BGG geloggt: {err}\n\n"
                 f"Erneut versuchen mit `{DOMAIN}.upload_play` und `play_id: {play_id}`.",
                 title="BGG: Partie nicht hochgeladen",
                 notification_id=f"{DOMAIN}_upload_{play_id}",

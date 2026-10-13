@@ -34,7 +34,9 @@
           "only_owned": "Nur Spiele im Besitz synchronisieren",
           "include_expansions": "Erweiterungen mitsynchronisieren und verknüpfen",
           "media_player": "Wiedergabegerät für Playlists",
-          "end_scene": "Szene/Skript bei Spielende"
+          "end_scene": "Szene/Skript bei Spielende",
+          "bgg_password": "BGG-Passwort (nur zum Loggen von Partien auf BGG)",
+          "upload_plays": "Beendete und nachgetragene Partien automatisch auf BGG loggen"
         }
       }
     }
@@ -161,6 +163,10 @@
         "players": {
           "name": "Spieleranzahl",
           "description": "Anzahl der Mitspielenden."
+        },
+        "upload_to_bgg": {
+          "name": "Auf BGG loggen",
+          "description": "Partie zusätzlich auf BGG loggen (Standard: Einstellung in den Optionen). Braucht das BGG-Passwort."
         }
       }
     },
@@ -199,6 +205,24 @@
         "note": {
           "name": "Notiz",
           "description": "Freitext zur Partie (optional)."
+        },
+        "upload_to_bgg": {
+          "name": "Auf BGG loggen",
+          "description": "Partie zusätzlich auf BGG loggen (Standard: Einstellung in den Optionen). Braucht das BGG-Passwort."
+        }
+      }
+    },
+    "upload_play": {
+      "name": "Partie auf BGG loggen",
+      "description": "Lädt eine lokal gespeicherte Partie auf BGG hoch, z. B. nach einem fehlgeschlagenen Upload. Braucht das BGG-Passwort in den Optionen.",
+      "fields": {
+        "play_id": {
+          "name": "Partie-ID",
+          "description": "Lokale ID der Partie (Feld id aus get_plays)."
+        },
+        "entry_id": {
+          "name": "Eintrag",
+          "description": "Nur diesen BGG-Account verwenden."
         }
       }
     },

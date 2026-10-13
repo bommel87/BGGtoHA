@@ -40,7 +40,19 @@ nochmal scannen = Partie beenden.
 - `log_play` trägt eine Partie nachträglich ein, `cancel_play` verwirft die laufende, `get_plays` liest zurück.
 - Events: `bgg_collection_sync_play_started` / `bgg_collection_sync_play_ended`.
 - Tabellen: `plays` (läuft eine Partie, ist `ended_at` leer – übersteht Neustarts).
-- **Hinweis:** Partien werden lokal gespeichert, nicht zu BGG hochgeladen.
+- Partien werden immer lokal gespeichert.
+
+### Partien auf BGG loggen
+In den Optionen der Integration das **BGG-Passwort** eintragen. Ist **automatisch auf BGG loggen** aktiv, landen
+beendete (`end_play`, auch per NFC) und nachgetragene (`log_play`) Partien zusätzlich auf BGG. Pro Aufruf lässt sich
+das mit `upload_to_bgg: true/false` übersteuern. Übertragen werden Spiel, Datum, Dauer, Notiz und der Gewinner als
+Spieler.
+
+Die offizielle XML-API kann nur lesen. Die Integration meldet sich deshalb wie die BGG-Webseite an und nutzt deren
+Schnittstelle `geekplay.php`. Diese Schnittstelle ist inoffiziell und kann sich ändern. Schlägt der Upload fehl, z. B.
+wegen Cloudflare oder eines falschen Passworts, bleibt die Partie lokal erhalten, und es erscheint eine
+Benachrichtigung. Erneut versuchen mit `bgg_collection_sync.upload_play` und `play_id` (Feld `id` aus `get_plays`).
+Bereits hochgeladene Partien haben eine `bgg_play_id` und werden nicht doppelt geloggt.
 
 ## Spielvorschlag
 `suggest_game` (`players`, `mode` any/cooperative/competitive, `game_type`
