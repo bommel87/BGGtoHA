@@ -1,9 +1,11 @@
 """Partien, Metadaten, NFC-Tags und Spielvorschläge."""
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
+from urllib.parse import quote
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +32,22 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 TAG_MAX_AGE = timedelta(minutes=10)
+BGSTATS_URL = "https://app.bgstatsapp.com/createPlay.html"
+
+
+def _winners(winner: str | None) -> set[str]:
+    """Gewinner-Text ("Anna, Ben") -> Menge in Kleinbuchstaben."""
+    return {w.strip().lower() for w in (winner or "").split(",") if w.strip()}
+
+
+def _fmt_score(score: float) -> str:
+    return f"{score:g}"
+
+
+def _qr_svg(url: str) -> str:
+    import segno  # noqa: PLC0415 - erst bei Bedarf laden
+
+    return segno.make(url, error="m").svg_inline(scale=4, border=2, dark="#000", light="#fff")
 _SCENE_RE = re.compile(r"^(scene|script)\.[a-z0-9_]+$")
 
 
@@ -231,6 +249,7 @@ class BggManager:
         players: int | None = None,
         upload: bool | None = None,
         player_names: list[str] | None = None,
+        scores: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         active = self.coordinator.data["active_play"]
         if not active:
@@ -240,7 +259,7 @@ class BggManager:
         duration = max(1, round((ended - started).total_seconds() / 60))
         if player_names is None:  # beim Start gewählte Mitspieler übernehmen
             player_names = [p["name"] for p in active["player_names"]]
-        lineup = self.resolve_players(player_names, winner)
+        lineup, my_score, winner = self._lineup(player_names, winner, scores)
         players = players or (len(lineup) + 1 if lineup else active["players"])
         await self.hass.async_add_executor_job(
             self.coordinator.db.end_play,
@@ -251,6 +270,7 @@ class BggManager:
             winner,
             note,
             lineup,
+            my_score,
         )
         await self._apply_end()
         await self.coordinator.async_refresh_local()
@@ -265,7 +285,12 @@ class BggManager:
                 "player_names": [p["name"] for p in lineup],
             },
         )
-        result = {"game": active["game_name"], "duration_min": duration, "players": players}
+        result = {
+            "game": active["game_name"],
+            "duration_min": duration,
+            "players": players,
+            "winner": winner,
+        }
         return {**result, **await self._maybe_upload(active["id"], upload)}
 
     async def _apply_end(self) -> None:
@@ -295,10 +320,11 @@ class BggManager:
         note: str | None,
         upload: bool | None = None,
         player_names: list[str] | None = None,
+        scores: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         start = played_at or dt_util.utcnow()
         end = start + timedelta(minutes=duration_min or 0)
-        lineup = self.resolve_players(player_names, winner)
+        lineup, my_score, winner = self._lineup(player_names, winner, scores)
         players = players or (len(lineup) + 1 if lineup else None)
         play_id = await self.hass.async_add_executor_job(
             self.coordinator.db.add_play,
@@ -312,9 +338,10 @@ class BggManager:
             winner,
             note,
             lineup,
+            my_score,
         )
         await self.coordinator.async_refresh_local()
-        result = {"game": game["name"], "played_at": start.isoformat()}
+        result = {"game": game["name"], "played_at": start.isoformat(), "winner": winner}
         return {**result, **await self._maybe_upload(play_id, upload)}
 
     # ---- Mitspieler -------------------------------------------------------
@@ -325,6 +352,33 @@ class BggManager:
             if p["name"].lower() == needle or (p["bgg_username"] or "").lower() == needle:
                 return p
         return None
+
+    def _lineup(
+        self, names: list[str] | None, winner: str | None, scores: dict[str, float] | None
+    ) -> tuple[list[dict[str, Any]], float | None, str | None]:
+        """Mitspieler + Punkte; ohne Gewinner-Angabe gewinnt die höchste Punktzahl (auch geteilt).
+
+        Liefert (Mitspieler, eigene Punkte, Gewinner als "Name, Name").
+        """
+        by_name = {k.strip().lower(): v for k, v in (scores or {}).items()}
+        me = self._username
+        # Mitspieler mit Punkten zählen mit, auch wenn sie nicht in names stehen
+        names = [*(names or []), *[k for k in (scores or {}) if k.strip().lower() != me.lower()]]
+        lineup = self.resolve_players(names, winner)
+        for p in lineup:
+            keys = (p["name"].lower(), (p["bgg_username"] or "").lower())
+            p["score"] = next((by_name[k] for k in keys if k in by_name), None)
+        my_score = by_name.get(me.lower())
+        given = [s for s in (my_score, *(p["score"] for p in lineup)) if s is not None]
+        if not (winner or "").strip() and given:
+            best = max(given)
+            winners = [me] if my_score == best else []
+            for p in lineup:
+                p["win"] = p["score"] == best
+                if p["win"]:
+                    winners.append(p["name"])
+            winner = ", ".join(winners)
+        return lineup, my_score, winner
 
     def resolve_players(
         self, names: list[str] | None, winner: str | None
@@ -435,18 +489,77 @@ class BggManager:
         """Spielerliste für BGG: du selbst + Mitspieler (mit BGG-Account, falls bekannt)."""
         winner = (play["winner"] or "").strip()
         lineup = play["player_names"]
-        if not lineup:  # nur Gewinner bekannt (wie bisher)
+        if not lineup and play.get("my_score") is None:  # nur Gewinner bekannt (wie bisher)
             return [{"name": winner, "win": 1}] if winner else None
         me = self._username
-        result = [
-            {"name": me, "username": me, "win": int(winner.lower() == me.lower())}
-        ]
+        mine = {"name": me, "username": me, "win": int(me.lower() in _winners(winner))}
+        if play.get("my_score") is not None:
+            mine["score"] = _fmt_score(play["my_score"])
+        result = [mine]
         for p in lineup:
             entry = {"name": p["name"], "win": int(bool(p.get("win")))}
             if p.get("bgg_username"):
                 entry["username"] = p["bgg_username"]
+            if p.get("score") is not None:
+                entry["score"] = _fmt_score(p["score"])
             result.append(entry)
         return result
+
+    # ---- BG Stats ---------------------------------------------------------
+    def bgstats_url(self, play: dict[str, Any]) -> str:
+        """Link, der die Partie in BG Stats importiert (offizielles createPlay-Format)."""
+        me = self._username
+        ended = dt_util.parse_datetime(play["ended_at"] or play["started_at"]) or dt_util.utcnow()
+        winners = _winners(play["winner"])
+        lineup = play["player_names"]
+
+        def player(name: str, ident: str, win: bool, score: float | None) -> dict[str, Any]:
+            entry: dict[str, Any] = {"name": name, "sourcePlayerId": ident, "winner": win}
+            if score is not None:
+                entry["score"] = score
+            return entry
+
+        players = [player(me, f"bgg:{me.lower()}", me.lower() in winners, play.get("my_score"))]
+        for p in lineup:
+            ident = f"bgg:{p['bgg_username'].lower()}" if p.get("bgg_username") else (
+                f"name:{p['name'].lower()}"
+            )
+            players.append(player(p["name"], ident, bool(p.get("win")), p.get("score")))
+        if not lineup and play["winner"] and me.lower() not in winners:
+            players.append(player(play["winner"], f"name:{play['winner'].lower()}", True, None))
+        has_scores = any("score" in p for p in players)
+        data: dict[str, Any] = {
+            "sourceName": "Home Assistant",
+            "sourcePlayId": f"ha-{me.lower()}-{play['id']}",
+            "playDate": dt_util.as_utc(ended).strftime("%Y-%m-%d %H:%M:%S"),
+            "durationMin": play["duration_min"] or 0,
+            "game": {
+                "name": play["game_name"],
+                "sourceGameId": str(play["bgg_id"]),
+                "bggId": play["bgg_id"],
+                "highestWins": True,
+                "noPoints": not has_scores,
+            },
+            "players": players,
+        }
+        if play["note"]:
+            data["comments"] = play["note"]
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        return f"{BGSTATS_URL}?data={quote(payload, safe='')}"
+
+    async def async_bgstats_link(self, play_id: int | None) -> dict[str, Any]:
+        """BG Stats-Link + QR-Code (SVG) für eine beendete Partie (Standard: die letzte)."""
+        db = self.coordinator.db
+        run = self.hass.async_add_executor_job
+        if play_id is None:
+            play = await run(db.get_last_play, self._username)
+        else:
+            play = await run(db.get_play, self._username, play_id)
+        if play is None or play["ended_at"] is None:
+            raise ServiceValidationError("Keine beendete Partie gefunden")
+        url = self.bgstats_url(play)
+        svg = await run(_qr_svg, url)
+        return {"play_id": play["id"], "game": play["game_name"], "url": url, "qr_svg": svg}
 
     async def _maybe_upload(self, play_id: int, upload: bool | None) -> dict[str, Any]:
         """Upload nach dem lokalen Speichern; Fehler verwerfen die Partie nicht."""

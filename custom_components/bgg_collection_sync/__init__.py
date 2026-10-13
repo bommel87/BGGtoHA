@@ -40,6 +40,7 @@ _ENTRY = {vol.Optional("entry_id"): cv.string}
 _GAME = {**_ENTRY, vol.Optional("bgg_id"): vol.Coerce(int), vol.Optional("name"): cv.string}
 _PLAYERS = vol.All(vol.Coerce(int), vol.Range(min=1, max=99))
 _PLAYER_NAMES = vol.All(cv.ensure_list, [cv.string])
+_SCORES = vol.Schema({cv.string: vol.Coerce(float)})
 
 GET_GAMES_SCHEMA = vol.Schema(
     {
@@ -69,6 +70,7 @@ END_PLAY_SCHEMA = vol.Schema(
         vol.Optional("players"): _PLAYERS,
         vol.Optional("upload_to_bgg"): cv.boolean,
         vol.Optional("player_names"): _PLAYER_NAMES,
+        vol.Optional("scores"): _SCORES,
     }
 )
 LOG_PLAY_SCHEMA = vol.Schema(
@@ -81,9 +83,11 @@ LOG_PLAY_SCHEMA = vol.Schema(
         vol.Optional("note"): cv.string,
         vol.Optional("upload_to_bgg"): cv.boolean,
         vol.Optional("player_names"): _PLAYER_NAMES,
+        vol.Optional("scores"): _SCORES,
     }
 )
 UPLOAD_PLAY_SCHEMA = vol.Schema({**_ENTRY, vol.Required("play_id"): vol.Coerce(int)})
+BGSTATS_LINK_SCHEMA = vol.Schema({**_ENTRY, vol.Optional("play_id"): vol.Coerce(int)})
 SET_PLAYER_SCHEMA = vol.Schema(
     {**_ENTRY, vol.Required("name"): cv.string, vol.Optional("bgg_username"): cv.string}
 )
@@ -237,6 +241,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             call.data.get("players"),
             call.data.get("upload_to_bgg"),
             call.data.get("player_names"),
+            call.data.get("scores"),
         )
 
     async def handle_cancel_play(call: ServiceCall) -> None:
@@ -254,6 +259,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             call.data.get("note"),
             call.data.get("upload_to_bgg"),
             call.data.get("player_names"),
+            call.data.get("scores"),
         )
 
     async def handle_sync_players(call: ServiceCall) -> None:
@@ -274,6 +280,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async def handle_get_players(call: ServiceCall) -> dict:
         players = _coordinator(hass, call).data.get("players", [])
         return {"count": len(players), "players": players}
+
+    async def handle_bgstats_link(call: ServiceCall) -> dict:
+        return await _coordinator(hass, call).manager.async_bgstats_link(call.data.get("play_id"))
 
     async def handle_upload_play(call: ServiceCall) -> dict:
         return await _coordinator(hass, call).manager.async_upload_play(call.data["play_id"])
@@ -325,6 +334,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         supports_response=SupportsResponse.OPTIONAL)
     reg(DOMAIN, "remove_player", handle_remove_player, schema=REMOVE_PLAYER_SCHEMA)
     reg(DOMAIN, "get_players", handle_get_players, schema=ENTRY_ONLY_SCHEMA,
+        supports_response=SupportsResponse.ONLY)
+    reg(DOMAIN, "bgstats_link", handle_bgstats_link, schema=BGSTATS_LINK_SCHEMA,
         supports_response=SupportsResponse.ONLY)
     reg(DOMAIN, "upload_play", handle_upload_play, schema=UPLOAD_PLAY_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL)

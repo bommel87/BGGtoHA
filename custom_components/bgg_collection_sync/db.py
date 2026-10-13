@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS plays (
     note         TEXT,
     source       TEXT    NOT NULL DEFAULT 'session',
     bgg_play_id  INTEGER,
-    player_names TEXT
+    player_names TEXT,
+    my_score     REAL
 );
 -- Von BGG geladene Partien (Quelle für Mitspieler-Statistik)
 CREATE TABLE IF NOT EXISTS bgg_plays (
@@ -186,6 +187,8 @@ class BggDatabase:
                 con.execute("ALTER TABLE plays ADD COLUMN bgg_play_id INTEGER")
             if "player_names" not in play_cols:  # Migration von 0.6.x
                 con.execute("ALTER TABLE plays ADD COLUMN player_names TEXT")
+            if "my_score" not in play_cols:  # Migration von 0.7.x
+                con.execute("ALTER TABLE plays ADD COLUMN my_score REAL")
 
     # ---- Sync-Cache -------------------------------------------------------
     def known_version_ids(self) -> set[int]:
@@ -394,12 +397,14 @@ class BggDatabase:
         winner: str | None,
         note: str | None,
         player_names: list[dict[str, Any]] | None = None,
+        my_score: float | None = None,
     ) -> None:
         with closing(self._connect()) as con, con:
             con.execute(
                 "UPDATE plays SET ended_at = ?, duration_min = ?, players = ?, winner = ?, "
-                "note = ?, player_names = ? WHERE id = ?",
-                (ended_at, duration_min, players, winner, note, _dumps(player_names), play_id),
+                "note = ?, player_names = ?, my_score = ? WHERE id = ?",
+                (ended_at, duration_min, players, winner, note, _dumps(player_names), my_score,
+                 play_id),
             )
 
     def cancel_play(self, play_id: int) -> None:
@@ -418,14 +423,16 @@ class BggDatabase:
         winner: str | None,
         note: str | None,
         player_names: list[dict[str, Any]] | None = None,
+        my_score: float | None = None,
+        source: str = "manual",
     ) -> int:
         with closing(self._connect()) as con, con:
             cur = con.execute(
                 "INSERT INTO plays (username, bgg_id, game_name, started_at, ended_at, "
-                "duration_min, players, winner, note, source, player_names) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)",
+                "duration_min, players, winner, note, source, player_names, my_score) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (username, bgg_id, name, started_at, ended_at, duration_min, players, winner,
-                 note, _dumps(player_names)),
+                 note, source, _dumps(player_names), my_score),
             )
             return cur.lastrowid
 
@@ -439,6 +446,10 @@ class BggDatabase:
     def set_bgg_play_id(self, play_id: int, bgg_play_id: int | None) -> None:
         with closing(self._connect()) as con, con:
             con.execute("UPDATE plays SET bgg_play_id = ? WHERE id = ?", (bgg_play_id, play_id))
+
+    def get_last_play(self, username: str) -> dict[str, Any] | None:
+        plays = self.get_plays(username, limit=1)
+        return plays[0] if plays else None
 
     def get_plays(
         self, username: str, bgg_id: int | None = None, limit: int = 50
