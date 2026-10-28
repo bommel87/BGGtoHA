@@ -111,20 +111,6 @@ Besitz. `reject_suggestion` → nächster Vorschlag, `accept_suggestion` → Sta
 Kooperativ = Mechanik „Cooperative Game"; Wettkampf schließt semi-kooperative Spiele ein. Der Typ stammt aus
 den BGG-Subdomains bzw. Kategorien. Spiele ohne diese Daten werden bei gesetztem Filter nicht vorgeschlagen.
 
-## Regelfragen mit HA Assist
-Die Integration stellt eine LLM-API **„Spielregeln (BGG)“** bereit. Ein Assist-Agent mit LLM (z. B. die
-Anthropic-Integration) liest damit deine Anleitungen und beantwortet Fragen daraus.
-
-1. Anleitungen als PDF nach `/config/spielregeln/` legen. Dateiname = Spielname wie in der Sammlung oder die
-   BGG-ID, z. B. `Catan.pdf` oder `13.pdf`. Mehrere Hefte gehen mit Zusatz: `Catan - Almanach.pdf`.
-2. Beim Konversationsagenten unter *Konfigurieren → Steuern von Home Assistant* **Spielregeln (BGG)** anhaken.
-3. In Assist fragen, z. B. „Darf ich in Catan den Räuber auf die Wüste setzen?“ Ohne Spielnamen ist das
-   laufende Spiel gemeint.
-
-Der Text wird beim ersten Abruf ausgelesen und unter `/config/spielregeln/.text/` zwischengespeichert. Ersetzt du
-ein PDF, wird er neu gelesen. Gescannte PDFs ohne Textebene lassen sich nicht auslesen, die vorher per OCR
-umwandeln. Das LLM antwortet nur aus der Anleitung und sagt, wenn dort nichts dazu steht.
-
 ## Entitäten
 `Sammlung`, `Erweiterungen`, `Partien`, `Spielsitzung` (idle/running), `Vorschlag`
 (idle/suggested/accepted/none, Attribute: name, location, summary …), `Letzte Synchronisierung`.
