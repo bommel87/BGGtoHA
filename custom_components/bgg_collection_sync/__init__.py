@@ -26,6 +26,7 @@ from .const import (
 from .coordinator import BggCoordinator
 from .db import BggDatabase
 from .logic import GAME_TYPES, MODES
+from .rules import async_register_rules_api
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,6 +153,7 @@ async def _async_register_card(hass: HomeAssistant) -> None:
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     await _async_register_card(hass)
+    async_register_rules_api(hass)
 
     async def handle_sync_now(call: ServiceCall) -> None:
         for entry in _loaded_entries(hass):
